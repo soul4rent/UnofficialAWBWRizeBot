@@ -96,6 +96,12 @@ export function emit(ctx: EmitContext, action: PlannedAction): ActionEnvelope {
 
     case "capture": {
       const unit = requireUnit(ctx, action, action.unitId);
+      // Capt carries a path, so the destination must be somewhere this unit can
+      // legally *end* its move, not merely somewhere the solver can route to --
+      // an allied-occupied tile is traversable but not a landing spot.
+      if (!ctx.reach.canStopAt(unit, action.x, action.y)) {
+        throw new IllegalActionError(action, `cannot stop at (${action.x},${action.y})`);
+      }
       const building = tileAt(ctx.state, action.x, action.y)?.building;
       if (!building) throw new IllegalActionError(action, "no property on that tile");
       return actions.capture(

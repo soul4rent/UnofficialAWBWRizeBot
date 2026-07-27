@@ -178,6 +178,38 @@ describe("playing a turn", () => {
     expect(move!.path.at(-1)).toBe(5);
   });
 
+  it("captures on the same turn it walks onto the property", async () => {
+    // Regression: the AI used to send a plain Move onto a reachable property and
+    // only capture on the following turn, wasting one turn per property. A Move
+    // ends the unit's turn; AWBW's Capt carries the path, so it must be one order.
+    //
+    // Infantry at (5,0) with 3 MP puts the neutral city at (2,0) exactly in
+    // range, while the enemy at (0,0) needs 4 MP to close on -- so no attack
+    // outranks the capture.
+    const page = createFakePage(DAMAGE, {
+      maxX: 9,
+      extra: "__placeUnit(unitsInfo[202], 5, 0);",
+    });
+    const sent = await playTurn(page);
+
+    const capture = sent.find((s) => s.action === "Capt") as
+      | { path: number[]; unitID: number; playerID: number }
+      | undefined;
+    expect(capture).toBeDefined();
+    expect(capture!.unitID).toBe(202);
+    expect(capture!.playerID).toBe(2);
+
+    // Path walks (5,0) -> (2,0); nodes are just x on a single-row width-9 map.
+    expect(capture!.path).toEqual([5, 4, 3, 2]);
+
+    // The walk must not also go out as a separate Move.
+    expect(sent.find((s) => s.action === "Move")).toBeUndefined();
+
+    // And the capture actually landed: 10 HP off the city's 20-point counter.
+    const captured = page.run<number>("buildingsInfo[2][0].buildings_capture");
+    expect(captured).toBe(10);
+  });
+
   it("does nothing when it is not the configured seat's turn", async () => {
     const page = createFakePage(DAMAGE, { currentTurn: 1 });
     loadBundle(page);

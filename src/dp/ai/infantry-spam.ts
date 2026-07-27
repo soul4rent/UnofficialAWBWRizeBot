@@ -163,10 +163,13 @@ export class InfantrySpamAI implements AiController {
     if (targets.length === 0) return null;
 
     for (const goal of sortByTravelCost(ctx.state, unit, targets)) {
-      // Reachable and free this turn? Go stand on it and start capturing next call.
+      // Reachable and free this turn? Walk on and start capturing in one order.
+      // AWBW's Capt carries the whole path (actions.ts:78), so arriving and the
+      // first capture tick are a single action -- sending a bare Move instead
+      // ends the unit's turn standing on the property, throwing a turn away.
       if (ctx.reach.canStopAt(unit, goal.x, goal.y)) {
         this.claimedCaptures.add(key(goal.x, goal.y));
-        return { kind: "move", unitId: unit.id, x: goal.x, y: goal.y };
+        return { kind: "capture", unitId: unit.id, x: goal.x, y: goal.y };
       }
 
       const step = stepToward(ctx, unit, goal);
