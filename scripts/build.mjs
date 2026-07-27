@@ -30,7 +30,7 @@ const options = {
   sourcemap: watch ? "inline" : false,
   legalComments: "none",
   banner: {
-    js: "/* Vibe Unofficial AWBW Bot — injected into the AWBW page world. */",
+    js: "/* Unofficial AWBW Rize Bot — injected into the AWBW page world. */",
   },
 };
 

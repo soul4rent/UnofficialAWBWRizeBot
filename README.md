@@ -1,4 +1,4 @@
-# Vibe Unofficial AWBW Bot
+# Unofficial AWBW Rize Bot
 
 A Firefox extension that plays the second seat of an [Advance Wars By Web](https://awbw.amarriner.com)
 **hotseat** game, using AI logic ported from [DefendPeace](https://github.com/Sri-Vastav/DefendPeace).
