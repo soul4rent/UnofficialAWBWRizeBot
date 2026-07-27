@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "Vibe Unofficial AWBW Bot",
+  "version": "0.1.0",
+  "description": "Plays the second seat of an Advance Wars By Web hotseat game using DefendPeace's AI logic. Frontend only; no changes to AWBW.",
+  "icons": {
+    "48": "res/icon48.png",
+    "96": "res/icon96.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://awbw.amarriner.com/game.php*"],
+      "js": ["content/bootstrap.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": ["page/bot.js"],
+  "permissions": ["https://awbw.amarriner.com/*"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vibe-unofficial-awbw-bot@localhost",
+      "strict_min_version": "115.0"
+    }
+  }
+}
