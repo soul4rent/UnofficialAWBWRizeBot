@@ -1,6 +1,6 @@
 {
   "name": "unofficial-awbw-rize-bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Firefox extension that plays the second seat of an AWBW hotseat game, using DefendPeace's AI logic.",
   "private": true,
   "type": "module",
