@@ -12,12 +12,19 @@
 import { g } from "../awbw/globals.js";
 import type { BotSettings } from "../main.js";
 
+export interface AiChoice {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+}
+
 export interface PanelApi {
   playOnce(): Promise<number>;
   startAutoPlay(): Promise<void>;
   stopAutoPlay(): void;
   defaultSeat(): number | null;
   updateSettings(patch: Partial<BotSettings>): void;
+  listAis(): AiChoice[];
 }
 
 const PANEL_ID = "awbw-bot-panel";
@@ -87,6 +94,22 @@ export function mountPanel(api: PanelApi, settings: BotSettings): void {
   });
   panel.appendChild(field("Seat ", seatSelect));
 
+  // --- AI picker. Switching mid-game is allowed; each AI keeps its own state,
+  //     so switching back resumes rather than restarting.
+  const aiSelect = el("select");
+  const choices = api.listAis();
+  for (const choice of choices) {
+    aiSelect.appendChild(
+      el("option", {
+        value: choice.id,
+        textContent: choice.label,
+        title: choice.description,
+        selected: choice.id === settings.aiId,
+      }),
+    );
+  }
+  panel.appendChild(field("AI ", aiSelect));
+
   // --- pacing
   const delayInput = el("input", {
     type: "number",
@@ -112,6 +135,12 @@ export function mountPanel(api: PanelApi, settings: BotSettings): void {
   dryInput.addEventListener("change", () => {
     api.updateSettings({ dryRun: dryInput.checked });
     status.textContent = dryInput.checked ? "dry run: actions are logged only" : "";
+  });
+
+  aiSelect.addEventListener("change", () => {
+    const chosen = choices.find((c) => c.id === aiSelect.value);
+    api.updateSettings({ aiId: aiSelect.value });
+    status.textContent = chosen ? `playing ${chosen.label}` : "";
   });
 
   // --- play one turn

@@ -100,18 +100,23 @@ describe("bundle boot", () => {
   });
 });
 
-describe("playing a turn", () => {
-  /** Plays seat 2's turn with no inter-action delay and returns what was sent. */
-  async function playTurn(page: FakePage): Promise<Array<Record<string, unknown>>> {
-    loadBundle(page);
-    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0 })`);
-    await (page.run("awbwBot.playOnce()") as Promise<void>);
-    return page.sent as Array<Record<string, unknown>>;
-  }
+/** Plays seat 2's turn with no inter-action delay and returns what was sent. */
+async function playTurn(
+  page: FakePage,
+  aiId: string,
+): Promise<Array<Record<string, unknown>>> {
+  loadBundle(page);
+  page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, aiId: ${JSON.stringify(aiId)} })`);
+  await (page.run("awbwBot.playOnce()") as Promise<void>);
+  return page.sent as Array<Record<string, unknown>>;
+}
+
+describe("playing a turn as ISAI", () => {
+  const playTurnAsIsai = (page: FakePage) => playTurn(page, "isai");
 
   it("fires a charged power, acts, and ends the turn", async () => {
     const page = createFakePage(DAMAGE);
-    const sent = await playTurn(page);
+    const sent = await playTurnAsIsai(page);
     const kinds = sent.map((s) => s.action);
 
     // Seat 2 starts with a full SCOP bar, so milestone-1 policy fires it first.
@@ -125,7 +130,7 @@ describe("playing a turn", () => {
 
   it("buys infantry from its base", async () => {
     const page = createFakePage(DAMAGE);
-    const sent = await playTurn(page);
+    const sent = await playTurnAsIsai(page);
 
     const build = sent.find((s) => s.action === "Build");
     expect(build).toMatchObject({
@@ -139,7 +144,7 @@ describe("playing a turn", () => {
 
   it("marches into range and attacks, with a path from its own tile", async () => {
     const page = createFakePage(DAMAGE);
-    const sent = await playTurn(page);
+    const sent = await playTurnAsIsai(page);
 
     const attack = sent.find((s) => s.action === "Fire") as
       | { attacker: { unitID: number; path: number[] }; defender: { unitID: number } }
@@ -162,7 +167,7 @@ describe("playing a turn", () => {
       maxX: 9,
       extra: "__placeUnit(unitsInfo[202], 8, 0);",
     });
-    const sent = await playTurn(page);
+    const sent = await playTurnAsIsai(page);
 
     expect(sent.find((s) => s.action === "Fire")).toBeUndefined();
 
@@ -190,7 +195,7 @@ describe("playing a turn", () => {
       maxX: 9,
       extra: "__placeUnit(unitsInfo[202], 5, 0);",
     });
-    const sent = await playTurn(page);
+    const sent = await playTurnAsIsai(page);
 
     const capture = sent.find((s) => s.action === "Capt") as
       | { path: number[]; unitID: number; playerID: number }
@@ -220,7 +225,7 @@ describe("playing a turn", () => {
 
   it("fires its power exactly once", async () => {
     const page = createFakePage(DAMAGE);
-    const sent = await playTurn(page);
+    const sent = await playTurnAsIsai(page);
     expect(sent.filter((s) => s.action === "Power")).toHaveLength(1);
   });
 
@@ -237,6 +242,108 @@ describe("playing a turn", () => {
     expect(page.sent).toHaveLength(0);
     expect(actionCount).toBeGreaterThan(0);
     expect(actionCount).toBeLessThan(20);
+  });
+});
+
+describe("playing a turn as JakeMan", () => {
+  const playTurnAsJakeMan = (page: FakePage) => playTurn(page, "jakeman");
+
+  it("follows its cap chain onto the neutral city", async () => {
+    // JakeMan plans capture routes out of each base before it does anything
+    // else, so the infantry sitting on Blue Moon's base at (4,0) walks the
+    // chain to the neutral city at (2,0) and starts capturing in one order.
+    const page = createFakePage(DAMAGE);
+    const sent = await playTurnAsJakeMan(page);
+
+    const capture = sent.find((s) => s.action === "Capt") as
+      | { path: number[]; unitID: number }
+      | undefined;
+    expect(capture).toBeDefined();
+    expect(capture!.unitID).toBe(202);
+    expect(capture!.path).toEqual([4, 3, 2]);
+  });
+
+  it("spends up to the best unit its base can make, rather than stopping at infantry", async () => {
+    // Seat 2 holds 9000. JakeMan fills the base with infantry to set a floor,
+    // then upgrades that slot as far as the budget stretches -- to a Tank.
+    const page = createFakePage(DAMAGE);
+    const sent = await playTurnAsJakeMan(page);
+
+    const build = sent.find((s) => s.action === "Build");
+    expect(build).toMatchObject({
+      action: "Build",
+      playerID: 2,
+      // Generic unit id 4 is Tank; 103 is Blue Moon's base.
+      unitID: 4,
+      buildingID: 103,
+    });
+  });
+
+  it("ends the turn, having fired its power exactly once", async () => {
+    const page = createFakePage(DAMAGE);
+    const sent = await playTurnAsJakeMan(page);
+
+    expect(sent.filter((s) => s.action === "Power")).toHaveLength(1);
+    expect(sent.at(-1)).toMatchObject({ action: "End", playerID: 2 });
+  });
+
+  it("terminates in dry-run mode, where nothing it sends takes effect", async () => {
+    // The safety net that matters most for a phase-based AI: with no server
+    // responding, no unit is ever marked as moved, so every phase would happily
+    // re-propose the same order until the action limit tripped.
+    const page = createFakePage(DAMAGE);
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, aiId: "jakeman", dryRun: true })`);
+
+    const actionCount = await (page.run("awbwBot.playOnce()") as Promise<number>);
+
+    expect(page.sent).toHaveLength(0);
+    expect(actionCount).toBeGreaterThan(0);
+    expect(actionCount).toBeLessThan(20);
+  });
+});
+
+describe("choosing an AI", () => {
+  it("offers JakeMan, OldSchoolCool and Infantry Spam, defaulting to JakeMan", () => {
+    const page = createFakePage(DAMAGE);
+    loadBundle(page);
+
+    const ids = page.run<string[]>("awbwBot.listAis().map(a => a.id)");
+    expect(ids).toEqual(["jakeman", "oldschoolcool", "isai"]);
+    expect(page.run("awbwBot.getSettings().aiId")).toBe("jakeman");
+  });
+
+  it("changes how the turn is played when you switch", async () => {
+    // Same board, same seat, same funds -- the only difference is the choice.
+    const isai = await playTurn(createFakePage(DAMAGE), "isai");
+    const jakeman = await playTurn(createFakePage(DAMAGE), "jakeman");
+
+    const builtBy = (sent: Array<Record<string, unknown>>) =>
+      (sent.find((s) => s.action === "Build") as { unitID: number } | undefined)?.unitID;
+
+    // ISAI buys nothing but infantry; JakeMan buys the biggest thing it can.
+    expect(builtBy(isai)).toBe(1);
+    expect(builtBy(jakeman)).toBe(4);
+  });
+
+  it("keeps each AI's own state, so switching back resumes rather than restarts", async () => {
+    const page = createFakePage(DAMAGE);
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, aiId: "jakeman" })`);
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    // Hand the next turn to ISAI and back again; JakeMan must not throw or
+    // re-plan from scratch when it picks the game back up.
+    page.run("__handTurnTo(2)");
+    page.run(`awbwBot.updateSettings({ aiId: "isai" })`);
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    page.run("__handTurnTo(2)");
+    page.run(`awbwBot.updateSettings({ aiId: "jakeman" })`);
+    const count = await (page.run("awbwBot.playOnce()") as Promise<number>);
+
+    expect(count).toBeGreaterThan(0);
+    expect(page.sent.at(-1)).toMatchObject({ action: "End", playerID: 2 });
   });
 });
 

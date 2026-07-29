@@ -157,6 +157,13 @@ function damageForLuck(
 export interface DamageOptions {
   /** Defaults to the attacker's live position. */
   readonly attackFrom?: { x: number; y: number };
+  /**
+   * Tile to score the defender's terrain cover from. Defaults to where the
+   * defender stands, which is right for an ordinary strike; predictBattle uses
+   * it to score the *counterattack* against the tile the attacker moved to,
+   * rather than the one it set off from.
+   */
+  readonly defenderAt?: { x: number; y: number };
   readonly attackerCo?: CoModifiers;
   readonly defenderCo?: CoModifiers;
   /** Defaults to vanilla (0 bad, 0-9 good). */
@@ -191,7 +198,8 @@ export function predictDamage(
   const percentage = basePercentage(table, attacker.genericId, defender.genericId, attacker.ammo);
   if (percentage === null) return null;
 
-  const terrainDefense = terrainDefenseFor(state, defender, defender.x, defender.y);
+  const defenderTile = options.defenderAt ?? defender;
+  const terrainDefense = terrainDefenseFor(state, defender, defenderTile.x, defenderTile.y);
   const co = options.attackerCo ?? VANILLA_CO;
   const defCo = options.defenderCo ?? VANILLA_CO;
   const towerBonus = 10 * comTowerCount(state, attacker.playerId);
@@ -267,6 +275,9 @@ export function predictBattle(
       defenderHp: options.attackerHp ?? attacker.hp ?? 10,
       attackerCo: options.defenderCo ?? VANILLA_CO,
       defenderCo: options.attackerCo ?? VANILLA_CO,
+      // The attacker eats the counter on the tile it moved to, not the one it
+      // started on -- which is the whole point of attacking from a mountain.
+      defenderAt: options.attackFrom ?? { x: attacker.x, y: attacker.y },
     });
   }
 

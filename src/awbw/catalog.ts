@@ -7,7 +7,7 @@
  */
 import { g } from "./globals.js";
 import type { BuildingState, GameState, PlayerState } from "./state.js";
-import { numOr } from "./state.js";
+import { numOr, tileAt } from "./state.js";
 import type { AwbwGenericUnit } from "./types.js";
 
 /** Movement types each property kind can produce (game.js:2858-2866). */
@@ -89,22 +89,73 @@ export function buildOptionsFor(
   return options.sort((a, b) => a.cost - b.cost);
 }
 
-/** Production properties the player owns with nothing standing on them. */
-export function openProductionBuildings(
+/** Every production property the player owns, occupied or not. */
+export function productionBuildings(
   state: GameState,
   playerId: number,
 ): BuildingState[] {
-  const open: BuildingState[] = [];
+  const found: BuildingState[] = [];
   for (const column of state.tiles) {
     for (const tile of column) {
       const building = tile.building;
       if (!building || building.playerId !== playerId) continue;
       if (!BUILDABLE_MOVE_TYPES[building.terrain.kind]) continue;
-      if (tile.unitId !== null) continue;
-      open.push(building);
+      found.push(building);
     }
   }
-  return open;
+  return found;
+}
+
+/** Production properties the player owns with nothing standing on them. */
+export function openProductionBuildings(
+  state: GameState,
+  playerId: number,
+): BuildingState[] {
+  return productionBuildings(state, playerId).filter(
+    (b) => tileAt(state, b.x, b.y)?.unitId == null,
+  );
+}
+
+/**
+ * Template stats for a unit type, as opposed to a unit on the board.
+ *
+ * An AI that reasons about *counter-building* needs to talk about unit types it
+ * does not own and cannot see -- "how many Anti-Airs would answer that Bomber" --
+ * so it needs the roster, not just the units present. `genericUnits` is the
+ * page's own copy of the awbw_units seed rows, which makes it the right source:
+ * it already reflects whatever unit set this game was created with.
+ */
+export interface UnitTypeInfo {
+  readonly name: string;
+  /** Key into the ATTACK1/ATTACK2 damage tables. */
+  readonly genericId: number;
+  readonly cost: number;
+  readonly moveType: string;
+  readonly movePoints: number;
+  readonly maxAmmo: number;
+  readonly maxFuel: number;
+  /** True for units that must fire from where they stand. */
+  readonly indirect: boolean;
+}
+
+/** The whole unit roster this game was created with, keyed by unit name. */
+export function unitTypes(): Map<string, UnitTypeInfo> {
+  const types = new Map<string, UnitTypeInfo>();
+  for (const [name, generic] of Object.entries(g.genericUnits() ?? {})) {
+    const unit = generic as AwbwGenericUnit;
+    const longRange = numOr(unit.units_long_range, 0);
+    types.set(name, {
+      name,
+      genericId: numOr(unit.units_id, -1),
+      cost: numOr(unit.units_cost, 0),
+      moveType: unit.units_movement_type,
+      movePoints: numOr(unit.units_movement_points, 0),
+      maxAmmo: numOr(unit.units_ammo, 0),
+      maxFuel: numOr(unit.units_fuel, 0),
+      indirect: longRange > 0,
+    });
+  }
+  return types;
 }
 
 /** Looks up a build option by unit name on a given property. */

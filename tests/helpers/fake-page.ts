@@ -98,15 +98,38 @@ let freezeGame = false;
 const banUnits = {};
 const labUnits = null;
 
+// The real roster, from awbw_units in awbw/db_sanitized.sql. An AI that
+// counter-builds reasons about types nobody has built yet, so a two-entry stub
+// would quietly disable half of JakeMan.
+function __generic(id, name, cost, move, mType, fuel, ammo, shortR, longR) {
+  return { units_id: id, units_name: name, units_cost: cost,
+    units_movement_points: move, units_movement_type: mType, units_fuel: fuel,
+    units_fuel_per_turn: 0, units_ammo: ammo, units_short_range: shortR,
+    units_long_range: longR, units_second_weapon: "Y", units_vision: 2 };
+}
+
 const genericUnits = {
-  Infantry: { units_id: 1, units_name: "Infantry", units_cost: 1000,
-    units_movement_points: 3, units_movement_type: "F", units_fuel: 99,
-    units_fuel_per_turn: 0, units_ammo: 0, units_short_range: 0,
-    units_long_range: 0, units_second_weapon: "Y", units_vision: 2 },
-  Tank: { units_id: 4, units_name: "Tank", units_cost: 7000,
-    units_movement_points: 6, units_movement_type: "T", units_fuel: 70,
-    units_fuel_per_turn: 0, units_ammo: 9, units_short_range: 0,
-    units_long_range: 0, units_second_weapon: "Y", units_vision: 3 },
+  "Infantry":   __generic(1, "Infantry", 1000, 3, "F", 99, 0, 0, 0),
+  "Mech":       __generic(2, "Mech", 3000, 2, "B", 70, 3, 0, 0),
+  "Md.Tank":    __generic(3, "Md.Tank", 16000, 5, "T", 50, 8, 0, 0),
+  "Tank":       __generic(4, "Tank", 7000, 6, "T", 70, 9, 0, 0),
+  "Recon":      __generic(5, "Recon", 4000, 8, "W", 80, 0, 0, 0),
+  "APC":        __generic(6, "APC", 5000, 6, "T", 70, 0, 0, 0),
+  "Artillery":  __generic(7, "Artillery", 6000, 5, "T", 50, 9, 2, 3),
+  "Rocket":     __generic(8, "Rocket", 15000, 5, "W", 50, 6, 3, 5),
+  "Anti-Air":   __generic(9, "Anti-Air", 8000, 6, "T", 60, 9, 0, 0),
+  "Missile":    __generic(10, "Missile", 12000, 4, "W", 50, 6, 3, 5),
+  "Fighter":    __generic(11, "Fighter", 20000, 9, "A", 99, 9, 0, 0),
+  "Bomber":     __generic(12, "Bomber", 22000, 7, "A", 99, 9, 0, 0),
+  "B-Copter":   __generic(13, "B-Copter", 9000, 6, "A", 99, 6, 0, 0),
+  "T-Copter":   __generic(14, "T-Copter", 5000, 6, "A", 99, 0, 0, 0),
+  "Battleship": __generic(15, "Battleship", 28000, 5, "S", 99, 9, 2, 6),
+  "Cruiser":    __generic(16, "Cruiser", 18000, 6, "S", 99, 9, 0, 0),
+  "Lander":     __generic(17, "Lander", 12000, 6, "L", 99, 0, 0, 0),
+  "Sub":        __generic(18, "Sub", 20000, 5, "S", 60, 6, 0, 0),
+  "Stealth":    __generic(30, "Stealth", 24000, 6, "A", 60, 6, 0, 0),
+  "Neotank":    __generic(46, "Neotank", 22000, 6, "T", 99, 9, 0, 0),
+  "Mega Tank":  __generic(1141438, "Mega Tank", 28000, 4, "T", 50, 3, 0, 0),
 };
 
 let playersInfo = {
@@ -200,6 +223,12 @@ let __nextUnitId = 900;
 function __coordsOf(node) {
   const x = node % maxX;
   return { x: x, y: (node - x) / maxX };
+}
+
+/** Hands the turn to a seat and refreshes every unit, as a new turn would. */
+function __handTurnTo(playerId) {
+  currentTurn = playerId;
+  for (const id in unitsInfo) unitsInfo[id].units_moved = "N";
 }
 
 function __placeUnit(unit, x, y) {

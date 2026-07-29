@@ -47,24 +47,86 @@ src/
     actions.ts    one emitter per action verb
     pathing.ts    ReachIndex — cached wrapper over AWBW's own solver
     damage.ts     combat maths, ported from the Rust engine
-    catalog.ts    what each property can build, and for how much
+    catalog.ts    what each property can build, and the unit roster
     sync.ts       waits on ongoingAction / actionQueue between orders
-  dp/         the ported AI — never imports from awbw/
-    ai/infantry-spam.ts   port of DefendPeace's InfantrySpamAI
+  dp/         the ported AIs
+    ai/registry.ts        the AIs you can pick between
+    ai/infantry-spam.ts   port of InfantrySpamAI
+    ai/jakeman.ts         port of JakeMan (and OldSchoolCool)
+    ai/cap-phase.ts       port of CapPhaseAnalyzer — opening capture routes
+    ai/threat.ts          port of GenerateThreatMap / findThreatPower
+    ai/roles.ts           DefendPeace's unit roles, resolved to AWBW names
+    ai/utils.ts           shared helpers (AIUtils / AICombatUtils)
   bridge/     the only place the two vocabularies meet
   policy/     power usage policy
   driver.ts   plays one turn
   main.ts     entry point + console API
 ```
 
-`dp/` reasons over its own action vocabulary and never imports `awbw/`; `bridge/fromDp.ts`
-translates. That boundary is what keeps the AI testable against fixtures and makes
-the next AI a drop-in.
+`dp/` plans in its own action vocabulary and never emits; `bridge/fromDp.ts` is the
+only translator. That boundary is what keeps the AIs testable against fixtures and
+makes the next one a drop-in.
 
 **`ReachIndex` is the load-bearing piece.** It caches AWBW's solved movement graphs
 and serves *both* the AI's reasoning and the emitted payload, so what the AI
 believes is reachable cannot diverge from what it asks the server to do. The
 bridge refuses to send any action whose path did not come from it.
+
+## Choosing an AI
+
+The panel has an **AI** dropdown:
+
+| AI | What it does |
+|---|---|
+| **JakeMan** (default) | Port of DefendPeace's `JakeMan`. Plans capture routes off each base, takes fights where it has local force superiority, and counter-builds against what it can see. |
+| **OldSchoolCool** | JakeMan with the Md Tank counter-build switched off, as in DefendPeace. |
+| **Infantry Spam** | Port of `InfantrySpamAI`. Captures everything, buys nothing but infantry. |
+
+You can switch mid-game. Each AI keeps its own state, so switching away and back
+resumes rather than re-planning — which matters for JakeMan, whose capture chains
+are worked out once and then followed for the life of each unit.
+
+`awbwBot.listAis()` and `awbwBot.updateSettings({ aiId })` do the same from the console.
+
+### What JakeMan does
+
+DefendPeace builds it out of modules, each getting a shot at every unit in turn,
+restarting from the top after every action. The port keeps that shape exactly,
+because the driver re-snapshots between actions — so restarting from the top is
+what makes each decision see the consequences of the last.
+
+1. fire a charged power
+2. **cap chains** — follow the opening capture route planned for this unit
+3. finish any capture already in progress
+4. **free dudes** — any capture or attack available from a tile the enemy cannot
+   profitably punish, ranked by funds traded
+5. **build** — fill every base with infantry, work out whether the enemy's air and
+   armour need a specific answer (and save up if one is needed but unaffordable),
+   then upgrade what is left to the biggest thing each factory can make
+6. free dudes again, this time allowed to stand on our own factories
+7. **travel** — head for resupply, or a capture, or the nearest thing this unit
+   beats, shoving our own units aside if they are in the way
+
+The load-bearing idea is `isDudeFree`: sum the threat pointed at a tile by every
+enemy type that can hurt this unit, subtract the counter-threat our own units
+project onto the tiles around it, and only go there if nothing is left over. That
+one predicate is what stops it feeding units in a few at a time.
+
+Two things in the Java did not survive the crossing, both noted at their call sites:
+
+- **`DeployCOUOnTank`** — CO units are an AW4/Days-of-Ruin mechanic with no AWBW
+  equivalent, so the phase is dropped rather than faked.
+- **`GetFreeDudes`' `canEvict` flag** — dead in DefendPeace too, its eviction
+  branch being commented out, which makes two of the three passes identical; they
+  collapse into one.
+
+DefendPeace's `unitCap` check is also skipped: AWBW does not expose a unit cap to
+the page.
+
+Where DefendPeace asks its unit-model list which unit fills a role, this port
+resolves the roles straight to AWBW names (`Tank`, `Md.Tank`, `Anti-Air`,
+`B-Copter`, …), since AWBW has exactly one unit set. `dp/ai/roles.ts` shows the
+working for each lookup.
 
 ## Build
 
@@ -88,11 +150,11 @@ Re-run it when AWBW adds countries or terrain.
 3. **Load Temporary Add-on…** and pick `manifest.json`
 4. Open a hotseat game on awbw.amarriner.com
 
-A panel appears bottom-right. Pick the seat, then **Play this turn**, or
+A panel appears bottom-right. Pick the seat and the AI, then **Play this turn**, or
 **Start auto-play** to let it take every turn as it comes round.
 
 Nothing happens until you arm it. There is also a console API on `window.awbwBot`
-(`playOnce()`, `startAutoPlay()`, `stopAutoPlay()`, `snapshot()`).
+(`playOnce()`, `startAutoPlay()`, `stopAutoPlay()`, `snapshot()`, `listAis()`).
 
 **Try "Dry run" first** — it logs the exact payloads without sending anything.
 
@@ -104,6 +166,7 @@ Working:
 - Move, Capture, Fire, Build, End Turn, and CO powers
 - powers fired as soon as they charge
 - damage prediction matching AWBW exactly for vanilla COs
+- two AI ports — `JakeMan` (with its `OldSchoolCool` variant) and `InfantrySpamAI`
 
 Not yet:
 - **fog of war** — needs a vision model; the bot would cheat by reading state the
@@ -113,7 +176,11 @@ Not yet:
   parameters, so this is additive
 - tag COs, capture limits
 - Black Bomb, Piperunner, Stealth, sub diving, transports, silos — the action
-  emitters exist in `actions.ts`, but the AI does not yet use them
+  emitters exist in `actions.ts`, but no AI uses them yet. JakeMan will *counter-build*
+  against air units it sees, but it has no naval or transport play at all
+- **powers as JakeMan intends them** — DefendPeace fires them at three separate
+  points in the turn (start, after buying, at the end); the port keeps the
+  milestone-1 policy of firing once, as soon as charged
 - stronger play: `WallyAI` is the intended next port
 
 ## A note on running this

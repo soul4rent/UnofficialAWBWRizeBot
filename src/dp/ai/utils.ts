@@ -116,33 +116,44 @@ export function terrainCost(
 }
 
 /**
- * Full-map shortest path ignoring units and movement points, for ranking distant
- * goals. Returns total cost, or null when the goal is unreachable for this
- * movement type (an island, for a footsoldier).
+ * Travel cost from one tile to every other, ignoring units and movement points.
+ * Node indices are state.toNode order; unreachable tiles are simply absent.
+ *
+ * Results are memoised per snapshot. JakeMan asks this question a great many
+ * times per turn -- once per candidate destination when ranking travel goals,
+ * and once per (factory, property) pair when planning cap chains -- and a
+ * GameState is immutable, so caching on it is safe and turns an O(goals * map)
+ * pass into one flood fill per (unit type, origin).
  */
-export function theoreticalCost(
+const costFieldCache = new WeakMap<GameState, Map<string, Map<number, number>>>();
+
+export function travelCostsFrom(
   state: GameState,
   moveType: string,
   from: { x: number; y: number },
-  to: { x: number; y: number },
-): number | null {
+): Map<number, number> {
   const width = state.width;
   const height = state.height;
   const startNode = from.y * width + from.x;
-  const goalNode = to.y * width + to.x;
+
+  let perState = costFieldCache.get(state);
+  if (!perState) {
+    perState = new Map();
+    costFieldCache.set(state, perState);
+  }
+  const cacheKey = `${moveType}:${startNode}`;
+  const cached = perState.get(cacheKey);
+  if (cached) return cached;
 
   const best = new Map<number, number>([[startNode, 0]]);
-  // Small maps and infrequent calls; a sorted-array frontier is plenty.
-  const frontier: Array<{ node: number; cost: number }> = [{ node: startNode, cost: 0 }];
+  const frontier = new MinHeap();
+  frontier.push(startNode, 0);
   const seen = new Set<number>();
 
-  while (frontier.length > 0) {
-    frontier.sort((a, b) => a.cost - b.cost);
-    const current = frontier.shift()!;
+  while (frontier.size > 0) {
+    const current = frontier.pop()!;
     if (seen.has(current.node)) continue;
     seen.add(current.node);
-
-    if (current.node === goalNode) return current.cost;
 
     const x = current.node % width;
     const y = (current.node - x) / width;
@@ -164,12 +175,133 @@ export function theoreticalCost(
       const cost = current.cost + step;
       if (cost < (best.get(node) ?? Infinity)) {
         best.set(node, cost);
-        frontier.push({ node, cost });
+        frontier.push(node, cost);
       }
     }
   }
 
-  return null;
+  perState.set(cacheKey, best);
+  return best;
+}
+
+/**
+ * Travel cost to a fixed goal from every tile -- the mirror of
+ * travelCostsFrom, and the one to reach for when ranking many candidate tiles
+ * against a single destination.
+ *
+ * It is computed from one flood fill out of the goal rather than one per
+ * candidate. Terrain cost is charged on the tile you *enter*, so for any path
+ * between two tiles, cost(tile -> goal) and cost(goal -> tile) differ by exactly
+ * `enterCost(goal) - enterCost(tile)`. That is a fixed offset per endpoint pair,
+ * so the same paths are optimal both ways and correcting for it is exact, not
+ * an approximation.
+ */
+export function travelCostsTo(
+  state: GameState,
+  moveType: string,
+  goal: { x: number; y: number },
+): Map<number, number> {
+  const fromGoal = travelCostsFrom(state, moveType, goal);
+  const goalCost = terrainCost(state, moveType, goal.x, goal.y) ?? 0;
+
+  const costs = new Map<number, number>();
+  for (const [node, cost] of fromGoal) {
+    const x = node % state.width;
+    const y = (node - x) / state.width;
+    const own = terrainCost(state, moveType, x, y);
+    if (own === null) continue;
+    costs.set(node, cost + goalCost - own);
+  }
+  return costs;
+}
+
+/** A plain binary min-heap, so the flood fill is O(n log n) rather than O(n² log n). */
+class MinHeap {
+  private readonly nodes: number[] = [];
+  private readonly costs: number[] = [];
+
+  get size(): number {
+    return this.nodes.length;
+  }
+
+  push(node: number, cost: number): void {
+    this.nodes.push(node);
+    this.costs.push(cost);
+    let i = this.nodes.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.costs[parent]! <= this.costs[i]!) break;
+      this.swap(i, parent);
+      i = parent;
+    }
+  }
+
+  pop(): { node: number; cost: number } | null {
+    if (this.nodes.length === 0) return null;
+    const node = this.nodes[0]!;
+    const cost = this.costs[0]!;
+
+    const lastNode = this.nodes.pop()!;
+    const lastCost = this.costs.pop()!;
+    if (this.nodes.length > 0) {
+      this.nodes[0] = lastNode;
+      this.costs[0] = lastCost;
+
+      let i = 0;
+      for (;;) {
+        const left = 2 * i + 1;
+        const right = left + 1;
+        let smallest = i;
+        if (left < this.costs.length && this.costs[left]! < this.costs[smallest]!) {
+          smallest = left;
+        }
+        if (right < this.costs.length && this.costs[right]! < this.costs[smallest]!) {
+          smallest = right;
+        }
+        if (smallest === i) break;
+        this.swap(i, smallest);
+        i = smallest;
+      }
+    }
+    return { node, cost };
+  }
+
+  private swap(a: number, b: number): void {
+    [this.nodes[a], this.nodes[b]] = [this.nodes[b]!, this.nodes[a]!];
+    [this.costs[a], this.costs[b]] = [this.costs[b]!, this.costs[a]!];
+  }
+}
+
+/**
+ * Full-map shortest path ignoring units and movement points, for ranking distant
+ * goals. Returns total cost, or null when the goal is unreachable for this
+ * movement type (an island, for a footsoldier).
+ */
+export function theoreticalCost(
+  state: GameState,
+  moveType: string,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): number | null {
+  return travelCostsFrom(state, moveType, from).get(to.y * state.width + to.x) ?? null;
+}
+
+/**
+ * Tiles a unit of this movement type could reach with the given movement
+ * budget, ignoring units entirely. Corresponds to a PathCalcParams flood fill
+ * with canTravelThroughEnemies set (JakeMan.java:823).
+ */
+export function tilesWithinMoveCost(
+  state: GameState,
+  moveType: string,
+  from: { x: number; y: number },
+  budget: number,
+): Set<number> {
+  const within = new Set<number>();
+  for (const [node, cost] of travelCostsFrom(state, moveType, from)) {
+    if (cost <= budget) within.add(node);
+  }
+  return within;
 }
 
 /**
@@ -189,13 +321,13 @@ export function stepToward(
   const options = ctx.reach.freeDestinations(unit);
   if (options.length === 0) return null;
 
+  const toGoal = travelCostsTo(ctx.state, unit.moveType, goal);
+
   let best: Destination | null = null;
   let bestScore = Infinity;
 
   for (const option of options) {
-    const remaining =
-      theoreticalCost(ctx.state, unit.moveType, option, goal) ??
-      distance(option, goal) * 1000;
+    const remaining = toGoal.get(option.node) ?? distance(option, goal) * 1000;
 
     // Prefer getting closer; break ties by spending fewer movement points.
     const score = remaining * 1000 + option.cost;
@@ -240,5 +372,85 @@ export function isCapturableHere(
 export function isOccupied(state: GameState, x: number, y: number): boolean {
   return unitAt(state, x, y) !== null;
 }
+
+/**
+ * Property kinds that repair and resupply each movement type.
+ * Straight from AWBW's own turn processing (funcs/new_turn.php:295): ground
+ * units and piperunners on a base, city or HQ; sea units on a port; air units
+ * on an airport. Com Towers and Labs repair nothing, despite being properties.
+ */
+const REPAIRS_ON: Record<string, ReadonlyArray<BuildingState["terrain"]["kind"]>> = {
+  F: ["BASE", "CITY", "HQ"],
+  B: ["BASE", "CITY", "HQ"],
+  T: ["BASE", "CITY", "HQ"],
+  W: ["BASE", "CITY", "HQ"],
+  P: ["BASE", "CITY", "HQ"],
+  L: ["PORT"],
+  S: ["PORT"],
+  A: ["AIRPORT"],
+};
+
+/** Our properties where this unit would be repaired and resupplied. */
+export function findRepairDepots(
+  state: GameState,
+  seatId: number,
+  unit: UnitState,
+): BuildingState[] {
+  const kinds = REPAIRS_ON[unit.moveType];
+  if (!kinds) return [];
+
+  const depots: BuildingState[] = [];
+  for (const column of state.tiles) {
+    for (const tile of column) {
+      const building = tile.building;
+      if (!building || building.playerId === null) continue;
+      if (!areAllied(state, seatId, building.playerId)) continue;
+      if (kinds.includes(building.terrain.kind)) depots.push(building);
+    }
+  }
+  return depots;
+}
+
+/** True when one of our own units is already capturing this tile. */
+export function isCapturing(
+  state: GameState,
+  seatId: number,
+  x: number,
+  y: number,
+): boolean {
+  const unit = unitAt(state, x, y);
+  if (!unit || !areAllied(state, seatId, unit.playerId)) return false;
+  return unit.captureProgress > 0;
+}
+
+/**
+ * Allied production properties among the given tiles.
+ * Port of AIUtils.findAlliedIndustries (AIUtils.java:340): with `ignoreMyOwn`,
+ * our own factories are left out of the result -- which is how JakeMan
+ * distinguishes "never stand on a factory" from "don't block an *ally's*".
+ */
+export function findAlliedIndustries(
+  state: GameState,
+  seatId: number,
+  coords: Iterable<{ x: number; y: number }>,
+  ignoreMyOwn: boolean,
+): Set<number> {
+  const found = new Set<number>();
+  for (const coord of coords) {
+    const building = tileAt(state, coord.x, coord.y)?.building;
+    if (!building || building.playerId === null) continue;
+    if (!areAllied(state, seatId, building.playerId)) continue;
+    if (ignoreMyOwn && building.playerId === seatId) continue;
+    if (!PRODUCTION_KINDS.has(building.terrain.kind)) continue;
+    found.add(coord.y * state.width + coord.x);
+  }
+  return found;
+}
+
+const PRODUCTION_KINDS = new Set<BuildingState["terrain"]["kind"]>([
+  "BASE",
+  "AIRPORT",
+  "PORT",
+]);
 
 export type { ReachIndex };

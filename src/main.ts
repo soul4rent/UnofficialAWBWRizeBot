@@ -12,7 +12,8 @@ import { setDryRun } from "./awbw/actions.js";
 import { MissingGlobalsError, g, isGamePage, isHotseat, requireGlobals } from "./awbw/globals.js";
 import { snapshot } from "./awbw/state.js";
 import { canAct, sleep } from "./awbw/sync.js";
-import { InfantrySpamAI } from "./dp/ai/infantry-spam.js";
+import { AI_REGISTRY, DEFAULT_AI_ID, findAi } from "./dp/ai/registry.js";
+import type { AiController } from "./dp/controller.js";
 import { playTurn } from "./driver.js";
 import { mountPanel } from "./ui/panel.js";
 
@@ -21,6 +22,8 @@ const LOG_PREFIX = "[awbw-bot]";
 export interface BotSettings {
   /** Seat the AI plays. Defaults to the hotseat seat that is not seat one. */
   seatId: number | null;
+  /** Which AI plays it -- an id from dp/ai/registry.ts. */
+  aiId: string;
   /** Play every turn automatically as it comes round. */
   autoPlay: boolean;
   /** Log payloads without sending them. */
@@ -30,6 +33,7 @@ export interface BotSettings {
 
 const settings: BotSettings = {
   seatId: null,
+  aiId: DEFAULT_AI_ID,
   autoPlay: false,
   dryRun: false,
   actionDelayMs: 600,
@@ -40,6 +44,26 @@ let watching = false;
 
 function log(message: string): void {
   console.info(`${LOG_PREFIX} ${message}`);
+}
+
+/**
+ * One live controller per AI id.
+ *
+ * JakeMan analyses the map once and then hands out capture chains that units
+ * follow for the rest of the game, so its instance has to survive between
+ * turns. Keeping the instance also means switching AIs mid-game and switching
+ * back resumes where the first one left off rather than re-planning.
+ */
+const controllers = new Map<string, AiController>();
+
+function controllerFor(aiId: string): AiController {
+  const entry = findAi(aiId);
+  const existing = controllers.get(entry.id);
+  if (existing) return existing;
+
+  const created = entry.create(log);
+  controllers.set(entry.id, created);
+  return created;
 }
 
 /**
@@ -85,7 +109,7 @@ export async function playOnce(): Promise<number> {
   try {
     const count = await playTurn({
       seatId,
-      ai: new InfantrySpamAI(),
+      ai: controllerFor(settings.aiId),
       actionDelayMs: settings.actionDelayMs,
       log,
     });
@@ -133,6 +157,8 @@ const api = {
   updateSettings,
   defaultSeat,
   snapshot,
+  /** The AIs you can put in `updateSettings({ aiId })`. */
+  listAis: () => AI_REGISTRY.map(({ id, label, description }) => ({ id, label, description })),
 };
 
 function boot(): void {
@@ -155,7 +181,8 @@ function boot(): void {
 
   log(
     isHotseat()
-      ? `ready — hotseat detected, seats ${g.allViewerPId().join(", ")}, default AI seat ${settings.seatId}`
+      ? `ready — hotseat detected, seats ${g.allViewerPId().join(", ")}, ` +
+          `default AI seat ${settings.seatId}, playing ${findAi(settings.aiId).label}`
       : "ready — not a hotseat game, so no seat is selected by default",
   );
 }
