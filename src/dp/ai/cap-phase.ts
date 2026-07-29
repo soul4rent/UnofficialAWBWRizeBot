@@ -323,6 +323,50 @@ export class CapPhaseAnalyzer {
   release(unitId: number): void {
     this.allocated.delete(unitId);
   }
+
+  /** True once this unit has been handed a chain to follow. */
+  isAllocated(unitId: number): boolean {
+    return this.allocated.has(unitId);
+  }
+
+  /**
+   * The next stop this unit's chain points at, without consuming anything.
+   * Read-only twin of nextStop, for callers (the travel phase) that want to know
+   * where a chain unit is headed without disturbing its chain.
+   */
+  peekStop(state: GameState, seatId: number, unit: UnitState): CapChainGoal | null {
+    const chain = this.allocated.get(unit.id);
+    if (!chain) return null;
+
+    const here = toNode(state, unit.x, unit.y);
+    for (const stop of chain) {
+      if (stop.node === here) continue;
+      const { x, y } = fromNode(state, stop.node);
+      const owner = state.tiles[x]?.[y]?.building?.playerId ?? null;
+      if (owner !== null && areAllied(state, seatId, owner)) continue;
+      return { x, y };
+    }
+    return null;
+  }
+
+  /**
+   * Every property an allocated chain still means to capture, so other units can
+   * be steered around them. Chains held in memory are lost on a page refresh; the
+   * set is simply empty then, which is why the travel phase must not rely on it
+   * being populated.
+   */
+  reservedNodes(state: GameState, seatId: number): Set<number> {
+    const reserved = new Set<number>();
+    for (const chain of this.allocated.values()) {
+      for (const stop of chain) {
+        const { x, y } = fromNode(state, stop.node);
+        const owner = state.tiles[x]?.[y]?.building?.playerId ?? null;
+        if (owner !== null && areAllied(state, seatId, owner)) continue;
+        reserved.add(stop.node);
+      }
+    }
+    return reserved;
+  }
 }
 
 function manhattan(state: GameState, node: number, to: { x: number; y: number }): number {

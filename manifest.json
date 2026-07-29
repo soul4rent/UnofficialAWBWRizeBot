@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Unofficial AWBW Rize Bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Plays the second seat of an Advance Wars By Web hotseat game using DefendPeace's AI logic. Frontend only; no changes to AWBW.",
   "icons": {
     "48": "res/icon48.png",

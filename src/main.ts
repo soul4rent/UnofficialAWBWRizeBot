@@ -43,22 +43,29 @@ function log(message: string): void {
 }
 
 /**
- * One live controller per AI id.
+ * One live controller per AI id *and seat*.
  *
  * JakeMan analyses the map once and then hands out capture chains that units
  * follow for the rest of the game, so its instance has to survive between
  * turns. Keeping the instance also means switching AIs mid-game and switching
  * back resumes where the first one left off rather than re-planning.
+ *
+ * The seat is part of the key because that per-game state is seat-specific: the
+ * cap analysis is built for one seat's factories, and its units compete with the
+ * other seat's for the same neutral properties. Two seats running the same AI
+ * must therefore each get their own instance, or one seat plays on the other's
+ * plan and they quietly trample each other's bookkeeping.
  */
 const controllers = new Map<string, AiController>();
 
-function controllerFor(aiId: string): AiController {
+function controllerFor(aiId: string, seatId: number): AiController {
   const entry = findAi(aiId);
-  const existing = controllers.get(entry.id);
+  const key = `${entry.id}:${seatId}`;
+  const existing = controllers.get(key);
   if (existing) return existing;
 
   const created = entry.create(log);
-  controllers.set(entry.id, created);
+  controllers.set(key, created);
   return created;
 }
 
@@ -104,7 +111,7 @@ export async function playOnce(): Promise<number> {
   try {
     const count = await playTurn({
       seatId,
-      ai: controllerFor(settings.aiId),
+      ai: controllerFor(settings.aiId, seatId),
       actionDelayMs: settings.actionDelayMs,
       log,
     });
