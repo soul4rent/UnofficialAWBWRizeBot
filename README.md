@@ -1,13 +1,47 @@
-# Unofficial AWBW Rize Bot
+# Unofficial AWBW Rize Bot (ALPHA)
 
 A Firefox extension that plays the second seat of an [Advance Wars By Web](https://awbw.amarriner.com)
-**hotseat** game, using AI logic ported from [DefendPeace](https://github.com/Sri-Vastav/DefendPeace).
+**hotseat** game, using AI logic ported from [DefendPeace](https://github.com/Sri-Vastav/DefendPeace). Blessings from both
+Rize and Lossus were given for this port.
 
-Frontend only. **No changes to AWBW are required or made.**
+## How to Install (Alpha Version)
+
+Requires **Firefox 142 or newer**. The add-on is unsigned, so it installs
+*temporarily*: Firefox drops it on restart and you repeat these steps next time.
+
+### From the packaged build (no tooling needed)
+
+1. Download `unofficial-awbw-rize-bot-0.1.0.zip` from the
+   [Releases](../../releases) page.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. **Load Temporary Add-on…**, and pick the downloaded `.zip`.
+4. Open a hotseat game on awbw.amarriner.com.
+
+### From source
+
+The shipped bundle `page/bot.js` is generated and **not** in the repository, so a
+checkout has to be built before Firefox can load it. Needs **Node.js 20+**.
+
+```sh
+git clone https://github.com/soul4rent/UnofficialAWBWRizeBot.git
+cd UnofficialAWBWRizeBot
+npm ci
+npm run build        # writes page/bot.js
+```
+
+Then load it:
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. **Load Temporary Add-on…**, and pick `manifest.json` from the clone.
+3. Open a hotseat game on awbw.amarriner.com.
+
+`npm run package` instead of `npm run build` writes the same ZIP as the release,
+to `web-ext-artifacts/`.
+
 
 ---
 
-## How it works
+## Bot Documentation - How it works
 
 AWBW's client turns out to be entirely scriptable from the page, which makes the
 whole thing simpler than driving synthetic clicks.
@@ -128,120 +162,8 @@ resolves the roles straight to AWBW names (`Tank`, `Md.Tank`, `Anti-Air`,
 `B-Copter`, …), since AWBW has exactly one unit set. `dp/ai/roles.ts` shows the
 working for each lookup.
 
-## Build instructions (for AMO reviewers)
-
-These steps reproduce an exact copy of the submitted add-on from source.
-
-### Build environment
-
-- **Operating system:** any OS that runs Node.js (built and tested on Linux;
-  macOS and Windows work identically). No OS-specific tooling is used.
-- **Node.js:** version **20 LTS or newer** (the submitted build was produced with
-  Node.js 24.18.0). Install from <https://nodejs.org/> (the LTS installer) or via
-  [nvm](https://github.com/nvm-sh/nvm): `nvm install 20 && nvm use 20`.
-- **npm:** ships with Node.js; version 10 or newer. No separate install needed.
-- **No other system programs are required** — the two build dependencies
-  (`esbuild`, `typescript`) are installed locally by npm from the committed
-  `package-lock.json`, and the ZIP writer in `scripts/package.mjs` uses only
-  Node's built-in `zlib`. No network access is needed after `npm ci`.
-
-### Steps
-
-```sh
-npm ci            # install exact locked dependency versions (esbuild 0.25.12, typescript 5.9.3)
-npm run package   # build src/ -> page/bot.js and write the AMO-ready ZIP
-```
-
-`npm run package` runs [`scripts/package.mjs`](scripts/package.mjs), which is the
-**single build script** that performs every step: it invokes
-[`scripts/build.mjs`](scripts/build.mjs) to bundle `src/main.ts` into
-`page/bot.js` with esbuild, then zips exactly the five runtime files the manifest
-references (`manifest.json`, `content/bootstrap.js`, `page/bot.js`,
-`res/icon48.png`, `res/icon96.png`) into
-`web-ext-artifacts/unofficial-awbw-rize-bot-<version>.zip`.
-
-- **`page/bot.js` is the only generated file.** Everything else in the package is
-  shipped verbatim from source. The bundle is **not minified** — output is
-  readable, formatted JavaScript.
-- The terrain table (`src/awbw/terrain-table.ts`) is **committed**, so no code
-  generation step beyond esbuild is needed to reproduce the build. (`npm run
-  gen:terrain` regenerates it from AWBW's database and is a maintenance task only;
-  reviewers do not need it.)
-
-To verify the result, compare the `page/bot.js` produced above against the one in
-the submitted ZIP — they are byte-for-byte identical for the same Node/esbuild
-versions.
-
-## Development
-
-```sh
-npm ci
-npm run build      # -> page/bot.js (no ZIP)
-npm run watch      # rebuild on change
-npm test
-npm run typecheck
-```
-
-`gen:terrain` reads `../awbw/db_sanitized.sql` by default; pass a path to override.
-Re-run it when AWBW adds countries or terrain.
-
-## Install (temporary, for development)
-
-1. `npm run build`
-2. Open `about:debugging#/runtime/this-firefox`
-3. **Load Temporary Add-on…** and pick `manifest.json`
-4. Open a hotseat game on awbw.amarriner.com
-
 A panel appears bottom-right. Pick the seat and the AI, then **Play this turn**, or
 **Start auto-play** to let it take every turn as it comes round.
 
 Nothing happens until you arm it. There is also a console API on `window.awbwBot`
 (`playOnce()`, `startAutoPlay()`, `stopAutoPlay()`, `snapshot()`, `listAis()`).
-
-## Current scope (milestone 1)
-
-Working:
-- 2-player hotseat, fog **off**
-- standard units and standard game mode
-- Move, Capture, Fire, Build, End Turn, and CO powers
-- powers fired as soon as they charge
-- damage prediction matching AWBW exactly for vanilla COs
-- two AI ports — `JakeMan` (with its `OldSchoolCool` variant) and `InfantrySpamAI`
-
-Not yet:
-- **fog of war** — needs a vision model; the bot would cheat by reading state the
-  seat cannot see, so keep fog off
-- **CO abilities** — every CO is treated as vanilla (100/100) when predicting
-  damage, though powers still fire. `damage.ts` already takes CO modifiers as
-  parameters, so this is additive
-- tag COs, capture limits
-- Black Bomb, Piperunner, Stealth, sub diving, transports, silos — the action
-  emitters exist in `actions.ts`, but no AI uses them yet. JakeMan will *counter-build*
-  against air units it sees, but it has no naval or transport play at all
-- **powers as JakeMan intends them** — DefendPeace fires them at three separate
-  points in the turn (start, after buying, at the end); the port keeps the
-  milestone-1 policy of firing once, as soon as charged
-- stronger play: `WallyAI` is the intended next port
-
-## A note on running this
-
-This drives a live third-party server. Hotseat is solo — you control both seats,
-so no opponent is being played against — but it is still automation pointed at
-someone else's site. It ships paced at ~600ms between actions and does nothing
-until explicitly armed per game. Worth checking AWBW's stance on automation
-before making heavy use of it.
-
-For iteration, the AWBW repo runs locally (`awbw/docker-compose.yml`); add a
-`http://localhost/*` match to `manifest.json` to develop against that instead.
-
-## Known fragility
-
-Production serves `js/lib`, not `js/src`. Symbol parity holds today — `js/lib` is
-a plain Babel transpile with no minification or renaming (see the `compilegame`
-script in `awbw/public_html/js/socketserver/package.json`) — but it is a build
-output. If AWBW ever minifies it, `requireGlobals()` fails loudly and the
-extension disables itself rather than half-playing a turn.
-
-For an AMO submission the manifest declares `data_collection_permissions:
-{ required: ["none"] }` (the extension collects no data) and sets
-`strict_min_version` to `142.0`, since that key requires Firefox 140+.
