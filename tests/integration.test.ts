@@ -120,6 +120,21 @@ describe("bundle boot", () => {
     loadBundle(page);
     expect(page.run("awbwBot.defaultSeat()")).toBe(2);
   });
+
+  it("keeps a unit's damage-table key after the socket has replaced its record", () => {
+    // `generic_id` is not a column: the PHP view synthesises it on render
+    // (game_map_viewer_data.php:388) and the socket's ClientDetailedUnit reply
+    // does not carry it (api/client/mod.rs:153), so it disappears from every unit
+    // that acts. Reading it off the record left the AI with no key into the damage
+    // tables, which is every unit unable to shoot or to see a threat.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    page.run("__respondWith(unitsInfo[202])");
+
+    expect(page.run("'generic_id' in unitsInfo[202]")).toBe(false);
+    // Infantry is generic unit 1, resolved from the unit's name via genericUnits.
+    expect(page.run("awbwBot.snapshot().units.get(202).genericId")).toBe(1);
+  });
 });
 
 describe("playing a game against other people", () => {
@@ -160,6 +175,31 @@ describe("playing a game against other people", () => {
       page.run("awbwBot.stopAutoPlay()");
     }
   }, 20_000);
+
+  it("keeps attacking on later turns, with no hotseat refresh to lean on", async () => {
+    // Regression: online the bot moved and captured all game but never fired a
+    // shot, while hotseat played fine. Cause was `generic_id`, which the socket's
+    // replies drop (see the boot test above). Hotseat hid it because handing over
+    // the turn refetches the board through the PHP view and puts the field back
+    // (swapActiveVision, game.js:5001) -- a path that needs two controlled seats,
+    // so a one-seat game never takes it and nothing ever restores the field.
+    //
+    // Turn one therefore proves nothing: the units have not acted yet. It is turn
+    // two, against records the socket has already replaced, that catches this.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, aiId: "isai" })`);
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    const firstTurn = page.sent.length;
+    expect(page.run("'generic_id' in unitsInfo[202]")).toBe(false);
+
+    page.run("__handTurnTo(2)");
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    const secondTurn = (page.sent as Array<Record<string, unknown>>).slice(firstTurn);
+    expect(secondTurn.map((s) => s.action)).toContain("Fire");
+  });
 });
 
 /** Plays seat 2's turn with no inter-action delay and returns what was sent. */

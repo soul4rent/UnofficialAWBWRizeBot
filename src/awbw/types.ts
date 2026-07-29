@@ -46,8 +46,15 @@ export interface AwbwUnit {
   units_cargo2_units_id: Numeric;
   units_carried: string;
   countries_code: string;
-  /** Key into genericUnits / the ATTACK1/ATTACK2 damage tables. */
-  generic_id: Numeric;
+  /**
+   * Key into genericUnits / the ATTACK1/ATTACK2 damage tables.
+   *
+   * Optional because it is not a column: only the PHP view layer emits it
+   * (game_map_viewer_data.php:388), so it is present on page load and gone from
+   * any record the socket has replaced. Read it through genericIdFor() in
+   * state.ts, never directly.
+   */
+  generic_id?: Numeric;
 }
 
 /** Template stats for a unit type, keyed by unit name in the `genericUnits` global. */

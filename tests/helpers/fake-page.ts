@@ -225,10 +225,33 @@ function __coordsOf(node) {
   return { x: x, y: (node - x) / maxX };
 }
 
-/** Hands the turn to a seat and refreshes every unit, as a new turn would. */
+/**
+ * Hands the turn to a seat, freeing every unit to act again.
+ *
+ * This is the *online* handover: endTurnHandler only refetches the board when the
+ * viewer holds more than one seat (game.js:5001), so records the socket has
+ * already replaced stay as they are from one turn to the next.
+ */
 function __handTurnTo(playerId) {
   currentTurn = playerId;
   for (const id in unitsInfo) unitsInfo[id].units_moved = "N";
+}
+
+/**
+ * Swaps a unit's record for the one the server sends back, the way game.js does
+ * (\`unitsInfo[unitResId] = unitResponse\` in moveUnit, game.js:3146).
+ *
+ * The reply is a ClientDetailedUnit (api/client/mod.rs:153), which carries no
+ * \`generic_id\` -- that field only ever comes from the PHP view layer
+ * (game_map_viewer_data.php:388). So every unit that acts loses it, and only a
+ * hotseat handover restores it. Mutating in place instead would hand the bot a
+ * page it will never actually meet online.
+ */
+function __respondWith(unit) {
+  const response = Object.assign({}, unit);
+  delete response.generic_id;
+  unitsInfo[unit.units_id] = response;
+  return response;
 }
 
 function __placeUnit(unit, x, y) {
@@ -244,18 +267,20 @@ function __placeUnit(unit, x, y) {
  * moved and the AI re-plans the same order forever.
  */
 function __applyAction(data) {
-  const unit = unitsInfo[data.unitID];
+  const acting = unitsInfo[data.unitID];
 
   switch (data.action) {
     case "Move": {
-      if (!unit) break;
+      if (!acting) break;
+      const unit = __respondWith(acting);
       const end = __coordsOf(data.path[data.path.length - 1]);
       __placeUnit(unit, end.x, end.y);
       unit.units_moved = "Y";
       break;
     }
     case "Capt": {
-      if (!unit) break;
+      if (!acting) break;
+      const unit = __respondWith(acting);
       const end = __coordsOf(data.path[data.path.length - 1]);
       __placeUnit(unit, end.x, end.y);
       unit.units_moved = "Y";
@@ -272,12 +297,13 @@ function __applyAction(data) {
       break;
     }
     case "Fire": {
-      const attacker = unitsInfo[data.attacker.unitID];
-      if (!attacker) break;
+      if (!unitsInfo[data.attacker.unitID]) break;
+      const attacker = __respondWith(unitsInfo[data.attacker.unitID]);
       const end = __coordsOf(data.attacker.path[data.attacker.path.length - 1]);
       __placeUnit(attacker, end.x, end.y);
       attacker.units_moved = "Y";
       attacker.units_fired = "Y";
+      if (unitsInfo[data.defender.unitID]) __respondWith(unitsInfo[data.defender.unitID]);
       break;
     }
     case "Build": {
@@ -301,7 +327,7 @@ function __applyAction(data) {
       const built = makeUnit(id, data.playerID, building.buildings_x, building.buildings_y,
                              template, player.countries_code);
       built.units_moved = "Y"; // freshly built units cannot act
-      unitsInfo[id] = built;
+      __respondWith(built);
       unitMap[building.buildings_x][building.buildings_y] =
         { units_id: id, team: String(player.players_team) };
       break;
