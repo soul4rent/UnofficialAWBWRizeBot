@@ -218,7 +218,6 @@ export class JakeMan implements AiController {
   private commanded = new Set<number>();
   private ordered = new Set<number>();
   private powerRequested = false;
-  private spentThisTurn = 0;
   private turnNumber = 0;
   /** The shopping list, held across actions so evictions can clear a factory. */
   private builds: Map<number, string> | null = null;
@@ -240,7 +239,6 @@ export class JakeMan implements AiController {
     this.commanded.clear();
     this.ordered.clear();
     this.powerRequested = false;
-    this.spentThisTurn = 0;
     this.builds = null;
     this.threat = null;
     this.threatFor = null;
@@ -604,11 +602,12 @@ export class JakeMan implements AiController {
       const option = buildOptionsFor(ctx.state, building, player).find(
         (o) => o.name === unitName,
       );
-      const budget = player.funds - this.spentThisTurn;
-      if (option && option.cost <= budget && !this.ordered.has(building.id)) {
+      // player.funds comes from a fresh snapshot the driver re-reads after every
+      // action has settled, so it already excludes what we spent earlier this
+      // turn -- do not subtract it again.
+      if (option && option.cost <= player.funds && !this.ordered.has(building.id)) {
         this.builds.delete(node);
         this.ordered.add(building.id);
-        this.spentThisTurn += option.cost;
         return {
           kind: "build",
           buildingId: building.id,
@@ -658,7 +657,9 @@ export class JakeMan implements AiController {
     const facilitiesFor = (name: string): number[] =>
       [...optionsAt].filter(([, byName]) => byName.has(name)).map(([node]) => node);
 
-    let budget = player.funds - this.spentThisTurn;
+    // player.funds is the fresh, already-settled balance (see buildStuff), so it
+    // is the whole budget -- nothing more to net out for this turn's spending.
+    let budget = player.funds;
 
     // Fill out production with inf first, to trim the budget.
     const infantry = this.roles.infantry;
@@ -801,7 +802,7 @@ export class JakeMan implements AiController {
           }
         }
       }
-      this.log(`  Built ${built}; Budget: ${budget} / ${player.funds - this.spentThisTurn}`);
+      this.log(`  Built ${built}; Budget: ${budget} / ${player.funds}`);
     }
 
     return builds;

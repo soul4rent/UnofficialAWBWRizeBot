@@ -60,7 +60,6 @@ export class InfantrySpamAI implements AiController {
    * looks charged, so without this the AI proposes it over and over.
    */
   private powerRequested = false;
-  private spentThisTurn = 0;
   private turnNumber = 0;
 
   initTurn(ctx: TurnContext): void {
@@ -69,7 +68,6 @@ export class InfantrySpamAI implements AiController {
     this.commanded.clear();
     this.ordered.clear();
     this.powerRequested = false;
-    this.spentThisTurn = 0;
 
     // Units mid-capture are already committed to their tile.
     for (const unit of ctx.state.units.values()) {
@@ -184,15 +182,15 @@ export class InfantrySpamAI implements AiController {
 
   /**
    * Buy infantry on every open base we can afford, one call at a time.
-   * Purchases cannot conflict with each other, but they do share a wallet, so we
-   * track spending locally -- the server's funds update only lands after the
-   * response animates.
+   *
+   * The driver re-snapshots and waits for each order to settle before the next
+   * call, so player.funds already reflects everything we bought earlier this
+   * turn -- we spend straight against it rather than tracking a running total,
+   * which would double-count and make us skip bases we can still afford.
    */
   private nextPurchase(ctx: TurnContext): PlannedAction | null {
     const player = ctx.state.players.get(ctx.seatId);
     if (!player) return null;
-
-    const budget = player.funds - this.spentThisTurn;
 
     for (const building of openProductionBuildings(ctx.state, ctx.seatId)) {
       if (this.ordered.has(building.id)) continue;
@@ -202,10 +200,9 @@ export class InfantrySpamAI implements AiController {
       const option = buildOptionsFor(ctx.state, building, player).find(
         (o) => o.name === SPAM_UNIT,
       );
-      if (!option || option.cost > budget) continue;
+      if (!option || option.cost > player.funds) continue;
 
       this.ordered.add(building.id);
-      this.spentThisTurn += option.cost;
       return {
         kind: "build",
         buildingId: building.id,

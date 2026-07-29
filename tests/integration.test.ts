@@ -271,6 +271,30 @@ describe("playing a turn as JakeMan", () => {
     expect(sent.filter((s) => s.action === "Power")).toHaveLength(1);
     expect(sent.at(-1)).toMatchObject({ action: "End", playerID: 2 });
   });
+
+  it("builds on every base it can afford, not just the first", async () => {
+    // Regression: JakeMan netted its own spending out of player.funds, but the
+    // driver re-snapshots after each order settles, so that balance already
+    // reflected the spend -- the double count drove the budget negative and every
+    // base after the first expensive build was skipped despite ample funds.
+    //
+    // Seat 2 holds 9000 and now has two bases: enough for a Tank on one and
+    // Infantry on the other. Both must produce.
+    const page = createFakePage(DAMAGE, {
+      extra: `buildingsInfo[3][0] = { buildings_id: 104, buildings_games_id: 42,
+        buildings_players_id: 2, buildings_team: 2, buildings_capture: 20,
+        buildings_x: 3, buildings_y: 0, countries_code: "bm", terrain_defense: 3,
+        terrain_id: 44, terrain_name: "Blue Moon Base" };`,
+    });
+    const sent = await playTurnAsJakeMan(page);
+
+    const builtAt = new Set(
+      sent.filter((s) => s.action === "Build").map((s) => s.buildingID),
+    );
+    // Blue Moon's original base and the added one both get an order.
+    expect(builtAt.has(103)).toBe(true);
+    expect(builtAt.has(104)).toBe(true);
+  });
 });
 
 describe("choosing an AI", () => {
