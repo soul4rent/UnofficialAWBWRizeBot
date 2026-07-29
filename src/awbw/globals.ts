@@ -179,7 +179,27 @@ export const g = {
   shortestPath: (solved: unknown, end: number) => findShortestPath(solved, end),
 };
 
+/**
+ * The seats this browser session is allowed to give orders for.
+ *
+ * `allViewerPId` holds every seat the logged-in account controls in this game:
+ * exactly one in an ordinary game against other people, several in a hotseat
+ * game, and none when merely spectating. AWBW gates its own board on the same
+ * list (getViewerPId at game.js:271, the `controlledPlayer` check at :5827), so
+ * a seat outside it is one the server would reject anyway.
+ *
+ * Ids are sanitised against playersInfo because a spectating viewer can carry a
+ * placeholder id that belongs to no seat.
+ */
+export function controlledSeats(): number[] {
+  const players = g.players();
+  return [...g.allViewerPId()]
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0 && players[String(id)] !== undefined)
+    .sort((a, b) => a - b);
+}
+
 /** True when this game is a hotseat game (the viewer controls more than one seat). */
 export function isHotseat(): boolean {
-  return g.allViewerPId().length > 1;
+  return controlledSeats().length > 1;
 }

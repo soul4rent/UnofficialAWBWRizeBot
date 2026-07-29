@@ -9,7 +9,7 @@
  * co_name straight from server data, and textContent means that can never be
  * markup.
  */
-import { g } from "../awbw/globals.js";
+import { controlledSeats, g } from "../awbw/globals.js";
 import type { BotSettings } from "../main.js";
 
 export interface AiChoice {
@@ -77,10 +77,12 @@ export function mountPanel(api: PanelApi, settings: BotSettings): void {
   const panel = el("div", { id: PANEL_ID });
   panel.appendChild(el("h4", { textContent: "AWBW Bot" }));
 
-  // --- seat picker
+  // --- seat picker. One entry in an ordinary game (your own seat), several in a
+  //     hotseat game, none when spectating -- see globals.controlledSeats().
   const seatSelect = el("select");
   const players = g.players();
-  for (const id of g.allViewerPId()) {
+  const seats = controlledSeats();
+  for (const id of seats) {
     const player = players[String(id)];
     const option = el("option", {
       value: String(id),
@@ -166,6 +168,16 @@ export function mountPanel(api: PanelApi, settings: BotSettings): void {
     }
   });
   panel.appendChild(autoButton);
+
+  // Spectating someone else's game: there is no seat the server would take
+  // orders for, so leave the controls visibly inert rather than silently no-op.
+  if (seats.length === 0) {
+    seatSelect.appendChild(el("option", { textContent: "none" }));
+    seatSelect.disabled = true;
+    playButton.disabled = true;
+    autoButton.disabled = true;
+    status.textContent = "no seat in this game";
+  }
 
   panel.appendChild(status);
   document.body.appendChild(panel);

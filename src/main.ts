@@ -8,7 +8,14 @@
  * control panel, and only on the seat you nominate -- this drives a live
  * third-party server, so opting in per game is the point.
  */
-import { MissingGlobalsError, g, isGamePage, isHotseat, requireGlobals } from "./awbw/globals.js";
+import {
+  MissingGlobalsError,
+  controlledSeats,
+  g,
+  isGamePage,
+  isHotseat,
+  requireGlobals,
+} from "./awbw/globals.js";
 import { snapshot } from "./awbw/state.js";
 import { canAct, sleep } from "./awbw/sync.js";
 import { AI_REGISTRY, DEFAULT_AI_ID, findAi } from "./dp/ai/registry.js";
@@ -19,7 +26,7 @@ import { mountPanel } from "./ui/panel.js";
 const LOG_PREFIX = "[awbw-bot]";
 
 export interface BotSettings {
-  /** Seat the AI plays. Defaults to the hotseat seat that is not seat one. */
+  /** Seat the AI plays. Must be one this session controls; see defaultSeat(). */
   seatId: number | null;
   /** Which AI plays it -- an id from dp/ai/registry.ts. */
   aiId: string;
@@ -70,12 +77,17 @@ function controllerFor(aiId: string, seatId: number): AiController {
 }
 
 /**
- * The seat to take over by default: in a hotseat game, the controlled seat that
- * is not the first one -- i.e. "player 2", the seat the human is not driving.
+ * The seat to take over by default.
+ *
+ * In an ordinary game against other people the account controls exactly one
+ * seat, so there is nothing to choose: that seat is the only one the server
+ * would accept orders for. In a hotseat game the account controls several, and
+ * the useful default is the one the human at the keyboard is *not* driving --
+ * i.e. "player 2". Spectating controls no seat, and returns null.
  */
 export function defaultSeat(): number | null {
-  const seats = [...g.allViewerPId()].sort((a, b) => a - b);
-  return seats.length > 1 ? (seats[1] ?? null) : null;
+  const seats = controlledSeats();
+  return (seats.length > 1 ? seats[1] : seats[0]) ?? null;
 }
 
 export function getSettings(): Readonly<BotSettings> {
@@ -98,7 +110,7 @@ export async function playOnce(): Promise<number> {
 
   const seatId = settings.seatId ?? defaultSeat();
   if (seatId === null) {
-    log("no seat selected, and this does not look like a hotseat game");
+    log("no seat selected; this session does not control a seat in this game");
     return -1;
   }
 
@@ -181,12 +193,15 @@ function boot(): void {
   (globalThis as Record<string, unknown>)["awbwBot"] = api;
   mountPanel(api, settings);
 
-  log(
-    isHotseat()
-      ? `ready — hotseat detected, seats ${g.allViewerPId().join(", ")}, ` +
-          `default AI seat ${settings.seatId}, playing ${findAi(settings.aiId).label}`
-      : "ready — not a hotseat game, so no seat is selected by default",
-  );
+  const seats = controlledSeats();
+  if (seats.length === 0) {
+    log("ready — but this session controls no seat here, so there is nothing to play");
+  } else {
+    log(
+      `ready — ${isHotseat() ? `hotseat, seats ${seats.join(", ")}` : `seat ${seats[0]}`}, ` +
+        `AI seat ${settings.seatId}, playing ${findAi(settings.aiId).label}`,
+    );
+  }
 }
 
 boot();

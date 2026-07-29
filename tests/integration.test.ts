@@ -10,9 +10,11 @@
  * Run `npm run build` first -- the test asserts against page/bot.js as shipped.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createFakePage, type FakePage } from "./helpers/fake-page.js";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const BUNDLE_PATH = new URL("../page/bot.js", import.meta.url);
 const DAMAGE = JSON.parse(
@@ -98,6 +100,66 @@ describe("bundle boot", () => {
     loadBundle(page);
     expect(page.run("awbwBot.defaultSeat()")).toBe(2);
   });
+
+  it("picks the only controlled seat in a game against other people", () => {
+    // AWBW puts exactly one seat in allViewerPId outside hotseat (game.js:277),
+    // and that seat is the only one the server would take orders for.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    expect(page.run("awbwBot.defaultSeat()")).toBe(2);
+  });
+
+  it("picks no seat when spectating someone else's game", () => {
+    const page = createFakePage(DAMAGE, { allViewerPId: [] });
+    loadBundle(page);
+    expect(page.run("awbwBot.defaultSeat()")).toBe(null);
+  });
+
+  it("ignores a viewer id that belongs to no seat", () => {
+    const page = createFakePage(DAMAGE, { allViewerPId: [0, 2] });
+    loadBundle(page);
+    expect(page.run("awbwBot.defaultSeat()")).toBe(2);
+  });
+});
+
+describe("playing a game against other people", () => {
+  it("plays the account's own seat without being told which one", async () => {
+    // The whole non-hotseat path: one controlled seat, no seatId configured, so
+    // the bot has to fall back to the seat the session actually owns.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ actionDelayMs: 0, aiId: "isai" })`);
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    const sent = page.sent as Array<Record<string, unknown>>;
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every((s) => s.playerID === undefined || s.playerID === 2)).toBe(true);
+    expect(sent.at(-1)).toMatchObject({ action: "End", playerID: 2 });
+  });
+
+  it("sits out the opponent's turn and plays when it comes round", async () => {
+    // What makes a live game work at all: the turn arrives while the page is
+    // open. AWBW reassigns `currentTurn` in place from its socket response
+    // (endTurnHandler, game.js:4968) rather than reloading, so auto-play's poll
+    // is what notices. Start on seat 1's turn to prove it waits for that.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2], currentTurn: 1 });
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ actionDelayMs: 0, aiId: "isai" })`);
+    page.run("awbwBot.startAutoPlay()");
+
+    try {
+      await sleep(1200);
+      expect(page.sent, "acted while the opponent held the turn").toHaveLength(0);
+
+      page.run("currentTurn = 2");
+      await vi.waitFor(
+        () => expect(page.sent.at(-1)).toMatchObject({ action: "End", playerID: 2 }),
+        { timeout: 10_000, interval: 50 },
+      );
+    } finally {
+      page.run("awbwBot.stopAutoPlay()");
+    }
+  }, 20_000);
 });
 
 /** Plays seat 2's turn with no inter-action delay and returns what was sent. */
