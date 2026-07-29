@@ -248,6 +248,44 @@ describe("playing a turn as JakeMan", () => {
     expect(capture!.path).toEqual([4, 3, 2]);
   });
 
+  it("finishes a capture in progress at the start of a fresh turn", async () => {
+    // Regression: the bot read capture progress off the unit's units_capture
+    // field, but AWBW clears that to 0 at the start of every turn -- so a unit
+    // that half-captured last turn looked idle this turn and wandered off to a
+    // different property, leaving captures perpetually unfinished. The progress
+    // that actually survives lives on the building's counter.
+    //
+    // Seat 2's infantry stands on the neutral city at (2,0), half-taken (counter
+    // at 10 of 20), with units_capture cleared exactly as the server leaves it.
+    // A second, untouched city sits farther out at (5,0): without the fix the bot
+    // reads no progress and GetFreeDudes -- which prefers the furthest capture --
+    // marches the unit off to that one, abandoning the half-done capture.
+    const page = createFakePage(DAMAGE, {
+      maxX: 6,
+      extra: `
+        buildingsInfo[5][0] = { buildings_id: 105, buildings_games_id: 42,
+          buildings_players_id: 0, buildings_team: null, buildings_capture: 20,
+          buildings_x: 5, buildings_y: 0, countries_code: "", terrain_defense: 3,
+          terrain_id: 34, terrain_name: "Neutral City" };
+        __placeUnit(unitsInfo[202], 2, 0);
+        buildingsInfo[2][0].buildings_capture = 10;
+        unitsInfo[202].units_capture = 0;
+      `,
+    });
+    const sent = await playTurnAsJakeMan(page);
+
+    // It must stay put and finish the capture, not move off to the far city.
+    const capture = sent.find((s) => s.action === "Capt" && s.unitID === 202) as
+      | { path: number[] }
+      | undefined;
+    expect(capture, "should finish the capture it already started").toBeDefined();
+    expect(capture!.path).toEqual([2]); // stays on (2,0)
+    expect(sent.find((s) => s.action === "Move" && s.unitID === 202)).toBeUndefined();
+
+    // And it landed: the city's counter drops from 10 to 0 and flips to seat 2.
+    expect(page.run<number>("buildingsInfo[2][0].buildings_players_id")).toBe(2);
+  });
+
   it("spends up to the best unit its base can make, rather than stopping at infantry", async () => {
     // Seat 2 holds 9000. JakeMan fills the base with infantry to set a floor,
     // then upgrades that slot as far as the budget stretches -- to a Tank.

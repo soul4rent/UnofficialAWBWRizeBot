@@ -153,6 +153,40 @@ function terrainFor(id: number | null): TerrainInfo {
   return TERRAIN_BY_ID[id] ?? { ...UNKNOWN_TERRAIN, id };
 }
 
+/** AWBW's capture counter: a pristine, uncaptured property reads 20. */
+const FULL_CAPTURE = 20;
+
+/**
+ * Capture progress a unit standing on (x,y) has banked, read from the *building*
+ * rather than the unit.
+ *
+ * AWBW clears units_capture to 0 at the start of every turn (new_turn.php:423)
+ * and only ever sets it to a bare 1 flag on a partial capture
+ * (capture_building.php:122), so the unit's own field cannot tell us it is
+ * mid-capture once its turn comes round again. The building's counter is what
+ * persists -- it drops as the capture progresses and only springs back to 20
+ * when the footsoldier steps off (perform_move.php:150). So a capturable
+ * property sitting below full, that is not already ours, is one this unit is
+ * partway through taking.
+ */
+function captureProgressAt(
+  buildings: ReturnType<typeof g.buildings>,
+  x: number,
+  y: number,
+  unitPlayerId: number,
+): number {
+  const raw = buildings[x]?.[y];
+  if (!raw) return 0;
+  if (!terrainFor(num(raw.terrain_id)).capturable) return 0;
+
+  const owner = num(raw.buildings_players_id);
+  const ownerId = owner !== null && owner > 0 ? owner : null;
+  if (ownerId === unitPlayerId) return 0;
+
+  const captureLeft = numOr(raw.buildings_capture, FULL_CAPTURE);
+  return captureLeft < FULL_CAPTURE ? FULL_CAPTURE - captureLeft : 0;
+}
+
 function readPlayers(): Map<number, PlayerState> {
   const players = new Map<number, PlayerState>();
   for (const [key, raw] of Object.entries(g.players())) {
@@ -188,6 +222,7 @@ function readPlayers(): Map<number, PlayerState> {
 
 function readUnits(): Map<number, UnitState> {
   const units = new Map<number, UnitState>();
+  const buildings = g.buildings();
   for (const raw of Object.values(g.units())) {
     const id = num(raw.units_id);
     const playerId = num(raw.units_players_id);
@@ -224,7 +259,7 @@ function readUnits(): Map<number, UnitState> {
       countryCode: raw.countries_code,
       moved: raw.units_moved === "Y" || numOr(raw.units_moved, 0) === 1,
       fired: raw.units_fired === "Y" || numOr(raw.units_fired, 0) === 1,
-      captureProgress: numOr(raw.units_capture, 0),
+      captureProgress: captureProgressAt(buildings, x, y, playerId),
       hidden: dive === "Y" || dive === "D",
       carried: raw.units_carried === "Y",
       cargo,
