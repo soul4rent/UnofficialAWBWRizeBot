@@ -122,20 +122,8 @@ export function mountPanel(api: PanelApi, settings: BotSettings): void {
   });
   panel.appendChild(field("Delay ", delayInput));
 
-  // --- dry run
-  const dryInput = el("input", { type: "checkbox", checked: settings.dryRun });
-  const dryLabel = el("label");
-  dryLabel.appendChild(dryInput);
-  dryLabel.appendChild(document.createTextNode(" Dry run"));
-  panel.appendChild(dryLabel);
-
   // --- status line, declared before the handlers that write to it
   const status = el("div", { className: "status" });
-
-  dryInput.addEventListener("change", () => {
-    api.updateSettings({ dryRun: dryInput.checked });
-    status.textContent = dryInput.checked ? "dry run: actions are logged only" : "";
-  });
 
   aiSelect.addEventListener("change", () => {
     const chosen = choices.find((c) => c.id === aiSelect.value);

@@ -41,17 +41,7 @@ export interface ActionEnvelope {
   [key: string]: unknown;
 }
 
-/** Set by main.ts; when false, payloads are logged but never sent. */
-let dryRun = false;
 let lastSent: ActionEnvelope | null = null;
-
-export function setDryRun(value: boolean): void {
-  dryRun = value;
-}
-
-export function isDryRun(): boolean {
-  return dryRun;
-}
 
 export function lastAction(): ActionEnvelope | null {
   return lastSent;
@@ -59,10 +49,6 @@ export function lastAction(): ActionEnvelope | null {
 
 function send(payload: ActionEnvelope): ActionEnvelope {
   lastSent = payload;
-  if (dryRun) {
-    console.info("[awbw-bot] (dry run) would send", payload);
-    return payload;
-  }
   g.emit(payload);
   return payload;
 }
