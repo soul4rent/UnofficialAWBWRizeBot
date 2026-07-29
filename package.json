@@ -4,6 +4,9 @@
   "description": "Firefox extension that plays the second seat of an AWBW hotseat game, using DefendPeace's AI logic.",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "gen:terrain": "node scripts/gen-terrain.mjs",
     "build": "node scripts/build.mjs",

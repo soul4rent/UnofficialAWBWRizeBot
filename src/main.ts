@@ -8,7 +8,6 @@
  * control panel, and only on the seat you nominate -- this drives a live
  * third-party server, so opting in per game is the point.
  */
-import { setDryRun } from "./awbw/actions.js";
 import { MissingGlobalsError, g, isGamePage, isHotseat, requireGlobals } from "./awbw/globals.js";
 import { snapshot } from "./awbw/state.js";
 import { canAct, sleep } from "./awbw/sync.js";
@@ -26,8 +25,6 @@ export interface BotSettings {
   aiId: string;
   /** Play every turn automatically as it comes round. */
   autoPlay: boolean;
-  /** Log payloads without sending them. */
-  dryRun: boolean;
   actionDelayMs: number;
 }
 
@@ -35,7 +32,6 @@ const settings: BotSettings = {
   seatId: null,
   aiId: DEFAULT_AI_ID,
   autoPlay: false,
-  dryRun: false,
   actionDelayMs: 600,
 };
 
@@ -81,7 +77,6 @@ export function getSettings(): Readonly<BotSettings> {
 
 export function updateSettings(patch: Partial<BotSettings>): void {
   Object.assign(settings, patch);
-  setDryRun(settings.dryRun);
 }
 
 /**

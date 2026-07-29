@@ -128,17 +128,59 @@ resolves the roles straight to AWBW names (`Tank`, `Md.Tank`, `Anti-Air`,
 `B-Copter`, …), since AWBW has exactly one unit set. `dp/ai/roles.ts` shows the
 working for each lookup.
 
-## Build
+## Build instructions (for AMO reviewers)
+
+These steps reproduce an exact copy of the submitted add-on from source.
+
+### Build environment
+
+- **Operating system:** any OS that runs Node.js (built and tested on Linux;
+  macOS and Windows work identically). No OS-specific tooling is used.
+- **Node.js:** version **20 LTS or newer** (the submitted build was produced with
+  Node.js 24.18.0). Install from <https://nodejs.org/> (the LTS installer) or via
+  [nvm](https://github.com/nvm-sh/nvm): `nvm install 20 && nvm use 20`.
+- **npm:** ships with Node.js; version 10 or newer. No separate install needed.
+- **No other system programs are required** — the two build dependencies
+  (`esbuild`, `typescript`) are installed locally by npm from the committed
+  `package-lock.json`, and the ZIP writer in `scripts/package.mjs` uses only
+  Node's built-in `zlib`. No network access is needed after `npm ci`.
+
+### Steps
 
 ```sh
-npm install
-npm run gen:terrain   # regenerate the terrain table from awbw/db_sanitized.sql
-npm run build         # -> page/bot.js
+npm ci            # install exact locked dependency versions (esbuild 0.25.12, typescript 5.9.3)
+npm run package   # build src/ -> page/bot.js and write the AMO-ready ZIP
+```
+
+`npm run package` runs [`scripts/package.mjs`](scripts/package.mjs), which is the
+**single build script** that performs every step: it invokes
+[`scripts/build.mjs`](scripts/build.mjs) to bundle `src/main.ts` into
+`page/bot.js` with esbuild, then zips exactly the five runtime files the manifest
+references (`manifest.json`, `content/bootstrap.js`, `page/bot.js`,
+`res/icon48.png`, `res/icon96.png`) into
+`web-ext-artifacts/unofficial-awbw-rize-bot-<version>.zip`.
+
+- **`page/bot.js` is the only generated file.** Everything else in the package is
+  shipped verbatim from source. The bundle is **not minified** — output is
+  readable, formatted JavaScript.
+- The terrain table (`src/awbw/terrain-table.ts`) is **committed**, so no code
+  generation step beyond esbuild is needed to reproduce the build. (`npm run
+  gen:terrain` regenerates it from AWBW's database and is a maintenance task only;
+  reviewers do not need it.)
+
+To verify the result, compare the `page/bot.js` produced above against the one in
+the submitted ZIP — they are byte-for-byte identical for the same Node/esbuild
+versions.
+
+## Development
+
+```sh
+npm ci
+npm run build      # -> page/bot.js (no ZIP)
+npm run watch      # rebuild on change
 npm test
 npm run typecheck
 ```
-
-`npm run watch` rebuilds on change.
 
 `gen:terrain` reads `../awbw/db_sanitized.sql` by default; pass a path to override.
 Re-run it when AWBW adds countries or terrain.
@@ -155,8 +197,6 @@ A panel appears bottom-right. Pick the seat and the AI, then **Play this turn**,
 
 Nothing happens until you arm it. There is also a console API on `window.awbwBot`
 (`playOnce()`, `startAutoPlay()`, `stopAutoPlay()`, `snapshot()`, `listAis()`).
-
-**Try "Dry run" first** — it logs the exact payloads without sending anything.
 
 ## Current scope (milestone 1)
 
@@ -202,6 +242,6 @@ script in `awbw/public_html/js/socketserver/package.json`) — but it is a build
 output. If AWBW ever minifies it, `requireGlobals()` fails loudly and the
 extension disables itself rather than half-playing a turn.
 
-`web-ext lint` reports one advisory warning, `MISSING_DATA_COLLECTION_PERMISSIONS`.
-That key would be needed for an AMO submission but requires Firefox 140+, which is
-not worth the compatibility floor for a locally-loaded extension.
+For an AMO submission the manifest declares `data_collection_permissions:
+{ required: ["none"] }` (the extension collects no data) and sets
+`strict_min_version` to `142.0`, since that key requires Firefox 140+.

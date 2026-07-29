@@ -228,21 +228,6 @@ describe("playing a turn as ISAI", () => {
     const sent = await playTurnAsIsai(page);
     expect(sent.filter((s) => s.action === "Power")).toHaveLength(1);
   });
-
-  it("sends nothing in dry-run mode, and still terminates", async () => {
-    // Regression: the driver re-snapshots between actions, so with no server to
-    // respond, a charged power keeps looking un-fired. Without the once-per-turn
-    // guard the AI proposed it until the 400-action safety limit tripped.
-    const page = createFakePage(DAMAGE);
-    loadBundle(page);
-    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, dryRun: true })`);
-
-    const actionCount = await (page.run("awbwBot.playOnce()") as Promise<number>);
-
-    expect(page.sent).toHaveLength(0);
-    expect(actionCount).toBeGreaterThan(0);
-    expect(actionCount).toBeLessThan(20);
-  });
 });
 
 describe("playing a turn as JakeMan", () => {
@@ -285,21 +270,6 @@ describe("playing a turn as JakeMan", () => {
 
     expect(sent.filter((s) => s.action === "Power")).toHaveLength(1);
     expect(sent.at(-1)).toMatchObject({ action: "End", playerID: 2 });
-  });
-
-  it("terminates in dry-run mode, where nothing it sends takes effect", async () => {
-    // The safety net that matters most for a phase-based AI: with no server
-    // responding, no unit is ever marked as moved, so every phase would happily
-    // re-propose the same order until the action limit tripped.
-    const page = createFakePage(DAMAGE);
-    loadBundle(page);
-    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, aiId: "jakeman", dryRun: true })`);
-
-    const actionCount = await (page.run("awbwBot.playOnce()") as Promise<number>);
-
-    expect(page.sent).toHaveLength(0);
-    expect(actionCount).toBeGreaterThan(0);
-    expect(actionCount).toBeLessThan(20);
   });
 });
 

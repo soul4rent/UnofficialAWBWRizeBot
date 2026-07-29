@@ -7,7 +7,7 @@
  * ReachIndex will happily path through a tile that is now occupied. Re-reading
  * is cheap and removes the whole class of desync bugs.
  */
-import { endTurn as emitEndTurn, isDryRun } from "./awbw/actions.js";
+import { endTurn as emitEndTurn } from "./awbw/actions.js";
 import { g } from "./awbw/globals.js";
 import { ReachIndex } from "./awbw/pathing.js";
 import { snapshot } from "./awbw/state.js";
@@ -96,8 +96,7 @@ export async function playTurn(options: DriverOptions): Promise<number> {
     }
 
     taken++;
-    // A dry run never reaches the server, so there is no round trip to wait on.
-    if (!isDryRun()) await settleAfterAction();
+    await settleAfterAction();
     if (actionDelayMs > 0) await sleep(actionDelayMs);
   }
 
@@ -110,7 +109,7 @@ export async function playTurn(options: DriverOptions): Promise<number> {
   if (canAct(seatId)) {
     emitEndTurn(seatId);
     log(`--- ended turn after ${taken} actions ---`);
-    if (!isDryRun()) await settleAfterAction();
+    await settleAfterAction();
   }
 
   return taken;
