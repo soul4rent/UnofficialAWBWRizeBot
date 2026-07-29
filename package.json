@@ -7,6 +7,7 @@
   "scripts": {
     "gen:terrain": "node scripts/gen-terrain.mjs",
     "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
     "watch": "node scripts/build.mjs --watch",
     "test": "vitest run",
     "test:watch": "vitest",
