@@ -226,6 +226,9 @@ export class JakeMan implements AiController {
   private threat: ThreatMap | null = null;
   private threatFor: GameState | null = null;
   private evictionStack: Set<number> | null = null;
+  /** Capture target per unit, derived fresh from each snapshot -- see below. */
+  private captureAssignment: Map<number, number> | null = null;
+  private captureAssignmentFor: GameState | null = null;
 
   constructor(options: JakeManOptions = {}) {
     this.buildCounters = options.buildCounters ?? true;
@@ -243,6 +246,8 @@ export class JakeMan implements AiController {
     this.threat = null;
     this.threatFor = null;
     this.evictionStack = null;
+    this.captureAssignment = null;
+    this.captureAssignmentFor = null;
 
     if (this.types.size === 0) {
       this.types = unitTypes();
@@ -943,10 +948,11 @@ export class JakeMan implements AiController {
     }
 
     if (canCaptureType(unit.moveType)) {
-      for (const node of this.futureCapTargets) {
-        const { x, y } = fromNode(ctx.state, node);
-        if (!isCapturing(ctx.state, ctx.seatId, x, y)) goals.push({ x, y });
-      }
+      // One committed property, not "the nearest of all of them recomputed every
+      // step" -- that recomputation is what made units flip-flop between two
+      // roughly-equidistant cities and never arrive to start a capture.
+      const target = this.committedCaptureTarget(ctx, unit);
+      if (target) goals.push(target);
     } else if (hasWeapon(ctx.damage, unit)) {
       // Head for the nearest example of each type we beat -- not the nearest
       // enemy, which is how units end up feeding themselves to their counters.
@@ -1002,6 +1008,99 @@ export class JakeMan implements AiController {
     goals: T[],
   ): T[] {
     return sortByTravelCost(ctx.state, unit, goals);
+  }
+
+  /**
+   * The single property this capturer is committed to, or null.
+   *
+   * A unit already following a cap chain keeps its chain's next stop. Every other
+   * capturer is matched to a property by planCaptureAssignment, which -- being a
+   * pure function of the current board -- hands it the same target turn after
+   * turn (so it stops changing its mind) and, crucially, recomputes to the same
+   * answer after a page refresh wipes the bot's in-memory state.
+   */
+  private committedCaptureTarget(
+    ctx: TurnContext,
+    unit: UnitState,
+  ): { x: number; y: number } | null {
+    const capPhase = this.capPhase;
+    if (capPhase?.isAllocated(unit.id)) {
+      return capPhase.peekStop(ctx.state, ctx.seatId, unit);
+    }
+
+    const node = this.captureTargets(ctx).get(unit.id);
+    return node === undefined ? null : fromNode(ctx.state, node);
+  }
+
+  /**
+   * A capturer-to-property assignment for every chain-less footsoldier, cached
+   * against the snapshot it was built from.
+   *
+   * The assignment is a deterministic function of unit positions and unowned
+   * properties -- no state is carried between turns. Two consequences fall out of
+   * that: it survives a refresh (the same board yields the same targets, so
+   * infantry resume the routes they were on), and it deconflicts by construction
+   * (each property is handed to at most one unit, so two infantry never walk at
+   * the same city).
+   */
+  private captureTargets(ctx: TurnContext): Map<number, number> {
+    if (this.captureAssignment && this.captureAssignmentFor === ctx.state) {
+      return this.captureAssignment;
+    }
+    const assignment = this.planCaptureAssignment(ctx);
+    this.captureAssignment = assignment;
+    this.captureAssignmentFor = ctx.state;
+    return assignment;
+  }
+
+  private planCaptureAssignment(ctx: TurnContext): Map<number, number> {
+    const assignment = new Map<number, number>();
+    const capPhase = this.capPhase;
+
+    // Candidate properties: ones we still want, that nobody is mid-capture on and
+    // that no cap chain has already spoken for.
+    const reserved = capPhase?.reservedNodes(ctx.state, ctx.seatId) ?? new Set<number>();
+    const candidates: number[] = [];
+    for (const node of this.futureCapTargets) {
+      if (reserved.has(node)) continue;
+      const { x, y } = fromNode(ctx.state, node);
+      if (isCapturing(ctx.state, ctx.seatId, x, y)) continue;
+      candidates.push(node);
+    }
+    if (candidates.length === 0) return assignment;
+
+    // Every capturer of ours, chain units aside (those are driven by
+    // capChainAction). Units that have *already* moved this turn are kept in the
+    // pool on purpose: one that walked toward a city but hasn't started capturing
+    // yet must still hold its claim, or the next unit routed would see the city
+    // as free and pile in behind it.
+    const capturers = unitsOf(ctx.state, ctx.seatId).filter(
+      (unit) => canCaptureType(unit.moveType) && !(capPhase?.isAllocated(unit.id) ?? false),
+    );
+    if (capturers.length === 0) return assignment;
+
+    // Every reachable (unit, property) pairing, cheapest first. Ties are broken
+    // by unit id then property node so the ordering -- and therefore the whole
+    // assignment -- is a pure function of the board, identical across a refresh.
+    const edges: Array<{ unitId: number; node: number; cost: number }> = [];
+    for (const unit of capturers) {
+      for (const node of candidates) {
+        const cost = theoreticalCost(ctx.state, unit.moveType, unit, fromNode(ctx.state, node));
+        if (cost === null) continue;
+        edges.push({ unitId: unit.id, node, cost });
+      }
+    }
+    edges.sort((a, b) => a.cost - b.cost || a.unitId - b.unitId || a.node - b.node);
+
+    const takenUnits = new Set<number>();
+    const takenNodes = new Set<number>();
+    for (const edge of edges) {
+      if (takenUnits.has(edge.unitId) || takenNodes.has(edge.node)) continue;
+      assignment.set(edge.unitId, edge.node);
+      takenUnits.add(edge.unitId);
+      takenNodes.add(edge.node);
+    }
+    return assignment;
   }
 
   /**
