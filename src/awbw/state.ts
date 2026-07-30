@@ -8,7 +8,13 @@
  */
 import { g } from "./globals.js";
 import { TERRAIN_BY_ID, type TerrainInfo } from "./terrain-table.js";
-import { FOG_HIDDEN, type AwbwPlayer, type Numeric } from "./types.js";
+import {
+  FOG_HIDDEN,
+  type AwbwGenericUnit,
+  type AwbwPlayer,
+  type AwbwUnit,
+  type Numeric,
+} from "./types.js";
 
 /** Coerces AWBW's mixed number/string columns. Fog's "?" becomes null. */
 export function num(value: Numeric | null | undefined): number | null {
@@ -220,9 +226,35 @@ function readPlayers(): Map<number, PlayerState> {
   return players;
 }
 
+/**
+ * The unit's key into the damage tables, resolved by name rather than trusted
+ * from the record.
+ *
+ * `generic_id` is not a column -- PHP synthesises it per render as
+ * `$genericUnits[$unitName]["units_id"]` (game_map_viewer_data.php:388). The
+ * socket sends back `ClientDetailedUnit` (api/client/mod.rs:153), which has no
+ * such field, and game.js swaps the record in wholesale on every order
+ * (`unitsInfo[unitResId] = unitResponse` in moveUnit, game.js:3146). So the
+ * field vanishes from any unit that acts.
+ *
+ * Hotseat hides this: handing over the turn calls swapActiveVision (game.js:5001,
+ * guarded on `allViewerPId.length > 1`), which refetches through the PHP view and
+ * puts `generic_id` back. Online the account holds one seat, that guard is false,
+ * and nothing ever restores it -- leaving the AI unable to look up any damage
+ * figure, so it neither shoots nor recognises a threat.
+ *
+ * `genericUnits` is a page-load constant keyed by the same unit names, and no
+ * socket traffic touches it, so it is the stable source.
+ */
+function genericIdFor(generics: Record<string, AwbwGenericUnit>, raw: AwbwUnit): number {
+  const byName = numOr(generics[raw.units_name]?.units_id, -1);
+  return byName > 0 ? byName : numOr(raw.generic_id, -1);
+}
+
 function readUnits(): Map<number, UnitState> {
   const units = new Map<number, UnitState>();
   const buildings = g.buildings();
+  const generics = g.genericUnits() ?? {};
   for (const raw of Object.values(g.units())) {
     const id = num(raw.units_id);
     const playerId = num(raw.units_players_id);
@@ -243,7 +275,7 @@ function readUnits(): Map<number, UnitState> {
       id,
       playerId,
       name: raw.units_name,
-      genericId: numOr(raw.generic_id, -1),
+      genericId: genericIdFor(generics, raw),
       x,
       y,
       hp: num(raw.units_hit_points),

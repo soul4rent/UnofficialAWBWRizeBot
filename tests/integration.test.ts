@@ -10,9 +10,11 @@
  * Run `npm run build` first -- the test asserts against page/bot.js as shipped.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createFakePage, type FakePage } from "./helpers/fake-page.js";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const BUNDLE_PATH = new URL("../page/bot.js", import.meta.url);
 const DAMAGE = JSON.parse(
@@ -97,6 +99,106 @@ describe("bundle boot", () => {
     const page = createFakePage(DAMAGE);
     loadBundle(page);
     expect(page.run("awbwBot.defaultSeat()")).toBe(2);
+  });
+
+  it("picks the only controlled seat in a game against other people", () => {
+    // AWBW puts exactly one seat in allViewerPId outside hotseat (game.js:277),
+    // and that seat is the only one the server would take orders for.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    expect(page.run("awbwBot.defaultSeat()")).toBe(2);
+  });
+
+  it("picks no seat when spectating someone else's game", () => {
+    const page = createFakePage(DAMAGE, { allViewerPId: [] });
+    loadBundle(page);
+    expect(page.run("awbwBot.defaultSeat()")).toBe(null);
+  });
+
+  it("ignores a viewer id that belongs to no seat", () => {
+    const page = createFakePage(DAMAGE, { allViewerPId: [0, 2] });
+    loadBundle(page);
+    expect(page.run("awbwBot.defaultSeat()")).toBe(2);
+  });
+
+  it("keeps a unit's damage-table key after the socket has replaced its record", () => {
+    // `generic_id` is not a column: the PHP view synthesises it on render
+    // (game_map_viewer_data.php:388) and the socket's ClientDetailedUnit reply
+    // does not carry it (api/client/mod.rs:153), so it disappears from every unit
+    // that acts. Reading it off the record left the AI with no key into the damage
+    // tables, which is every unit unable to shoot or to see a threat.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    page.run("__respondWith(unitsInfo[202])");
+
+    expect(page.run("'generic_id' in unitsInfo[202]")).toBe(false);
+    // Infantry is generic unit 1, resolved from the unit's name via genericUnits.
+    expect(page.run("awbwBot.snapshot().units.get(202).genericId")).toBe(1);
+  });
+});
+
+describe("playing a game against other people", () => {
+  it("plays the account's own seat without being told which one", async () => {
+    // The whole non-hotseat path: one controlled seat, no seatId configured, so
+    // the bot has to fall back to the seat the session actually owns.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ actionDelayMs: 0, aiId: "isai" })`);
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    const sent = page.sent as Array<Record<string, unknown>>;
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every((s) => s.playerID === undefined || s.playerID === 2)).toBe(true);
+    expect(sent.at(-1)).toMatchObject({ action: "End", playerID: 2 });
+  });
+
+  it("sits out the opponent's turn and plays when it comes round", async () => {
+    // What makes a live game work at all: the turn arrives while the page is
+    // open. AWBW reassigns `currentTurn` in place from its socket response
+    // (endTurnHandler, game.js:4968) rather than reloading, so auto-play's poll
+    // is what notices. Start on seat 1's turn to prove it waits for that.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2], currentTurn: 1 });
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ actionDelayMs: 0, aiId: "isai" })`);
+    page.run("awbwBot.startAutoPlay()");
+
+    try {
+      await sleep(1200);
+      expect(page.sent, "acted while the opponent held the turn").toHaveLength(0);
+
+      page.run("currentTurn = 2");
+      await vi.waitFor(
+        () => expect(page.sent.at(-1)).toMatchObject({ action: "End", playerID: 2 }),
+        { timeout: 10_000, interval: 50 },
+      );
+    } finally {
+      page.run("awbwBot.stopAutoPlay()");
+    }
+  }, 20_000);
+
+  it("keeps attacking on later turns, with no hotseat refresh to lean on", async () => {
+    // Regression: online the bot moved and captured all game but never fired a
+    // shot, while hotseat played fine. Cause was `generic_id`, which the socket's
+    // replies drop (see the boot test above). Hotseat hid it because handing over
+    // the turn refetches the board through the PHP view and puts the field back
+    // (swapActiveVision, game.js:5001) -- a path that needs two controlled seats,
+    // so a one-seat game never takes it and nothing ever restores the field.
+    //
+    // Turn one therefore proves nothing: the units have not acted yet. It is turn
+    // two, against records the socket has already replaced, that catches this.
+    const page = createFakePage(DAMAGE, { allViewerPId: [2] });
+    loadBundle(page);
+    page.run(`awbwBot.updateSettings({ seatId: 2, actionDelayMs: 0, aiId: "isai" })`);
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    const firstTurn = page.sent.length;
+    expect(page.run("'generic_id' in unitsInfo[202]")).toBe(false);
+
+    page.run("__handTurnTo(2)");
+    await (page.run("awbwBot.playOnce()") as Promise<void>);
+
+    const secondTurn = (page.sent as Array<Record<string, unknown>>).slice(firstTurn);
+    expect(secondTurn.map((s) => s.action)).toContain("Fire");
   });
 });
 

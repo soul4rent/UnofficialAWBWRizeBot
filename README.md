@@ -1,7 +1,7 @@
 # Unofficial AWBW Rize Bot (ALPHA)
 
-A Firefox extension that plays the second seat of an [Advance Wars By Web](https://awbw.amarriner.com)
-**hotseat** game, using AI logic ported from [DefendPeace](https://github.com/Sri-Vastav/DefendPeace). Blessings from both
+A Firefox extension that plays a seat of an [Advance Wars By Web](https://awbw.amarriner.com)
+game, using AI logic ported from [DefendPeace](https://github.com/Sri-Vastav/DefendPeace). Blessings from both
 Rize and Lossus were given for this port.
 
 ## How to Install (Alpha Version)
@@ -15,7 +15,7 @@ Requires **Firefox 142 or newer**. The add-on is unsigned, so it installs
    [Releases](../../releases) page.
 2. Open `about:debugging#/runtime/this-firefox`.
 3. **Load Temporary Add-on…**, and pick the downloaded `.zip`.
-4. Open a hotseat game on awbw.amarriner.com.
+4. Open one of your games on awbw.amarriner.com.
 
 ### From source
 
@@ -33,7 +33,7 @@ Then load it:
 
 1. Open `about:debugging#/runtime/this-firefox`.
 2. **Load Temporary Add-on…**, and pick `manifest.json` from the clone.
-3. Open a hotseat game on awbw.amarriner.com.
+3. Open one of your games on awbw.amarriner.com.
 
 `npm run package` instead of `npm run build` writes the same ZIP as the release,
 to `web-ext-artifacts/`.
@@ -164,6 +164,16 @@ working for each lookup.
 
 A panel appears bottom-right. Pick the seat and the AI, then **Play this turn**, or
 **Start auto-play** to let it take every turn as it comes round.
+
+The **Seat** dropdown lists the seats your account controls in this game — one in
+a game against other people, which is then preselected, or all of them in a
+hotseat game, where it defaults to the second. Spectating someone else's game
+leaves the panel inert, since there is no seat to play.
+
+In a live game, auto-play waits for your turn to come round. AWBW updates the
+open page when an opponent ends their turn (`endTurnHandler`, `game.js:4968`), so
+the bot sees it without a reload — but only for as long as the tab stays open.
+Arming does not survive a page load: reopen the game and you arm it again.
 
 Nothing happens until you arm it. There is also a console API on `window.awbwBot`
 (`playOnce()`, `startAutoPlay()`, `stopAutoPlay()`, `snapshot()`, `listAis()`).
